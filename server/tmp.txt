@@ -1,0 +1,2 @@
+mongodb+srv://mhzmdbuser1:mhzmdbpw@cluster0.rdah3hm.mongodb.net/cpms?appName=Cluster00
+MONGO_URI_0=mongodb://localhost:27017/cpms
