@@ -68,7 +68,7 @@ const estimationRequestSchema = new mongoose.Schema(
     status: {
       type: String,
       required: true,
-      enum: ["In Progress", "Completed", "Rejected", "Cancelled"],
+      enum: ["In Progress", "Completed", "Rejected"],
       default: "In Progress"
     }
   },

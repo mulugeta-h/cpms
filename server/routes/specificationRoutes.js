@@ -4,7 +4,7 @@ const router = express.Router();
 
 const {
   getAllSpecifications,
-  getInProgressEstimationIds,
+  getInProgressDCIds,
   createSpecification,
   updateSpecification,
   deleteSpecification,
@@ -16,7 +16,7 @@ const userAuth = require("../middleware/userAuth");
 router.use(userAuth);
 
 router.get("/", getAllSpecifications);
-router.get("/inprogress-estimation-ids", getInProgressEstimationIds);
+router.get("/inprogress-dcids", getInProgressDCIds);
 router.post("/", createSpecification);
 router.put("/:id", updateSpecification);
 router.delete("/:id", deleteSpecification);

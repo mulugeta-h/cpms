@@ -59,6 +59,11 @@ const INPROGRESS_DCIDS_URL = `${API_URL}/inprogress-dcids`;
 
 const STATUS_OPTIONS = ["In Progress", "Completed", "Rejected", "Cancelled"];
 
+// ✅ NEW — allowed CAD / archive extensions
+const ALLOWED_EXTS = [".dwg", ".zip", ".rar", ".iso"];
+const ALLOWED_EXTS_LABEL = ALLOWED_EXTS.join(", ");
+const FILE_ACCEPT_ATTR = ALLOWED_EXTS.join(",");
+
 /* ---------------- Pure helpers (hoisted) ---------------- */
 
 const getToday = () => {
@@ -95,6 +100,13 @@ const makeEmptyDesign = () => ({
   drawingFileName: "",
   remark: ""
 });
+
+// ✅ NEW — returns true if filename ends with an allowed extension
+const isAllowedFileName = (name) => {
+  if (!name) return false;
+  const lower = String(name).toLowerCase();
+  return ALLOWED_EXTS.some((ext) => lower.endsWith(ext));
+};
 
 /* ---------------- Shared styles ---------------- */
 
@@ -453,8 +465,12 @@ const Design = () => {
     const file = e.target.files?.[0];
     if (!file || !uploadTargetId) return;
 
-    if (!file.name.toLowerCase().endsWith(".dwg")) {
-      showSnackbar("Only .dwg files are allowed.", "error");
+    // ✅ Validate against all allowed extensions
+    if (!isAllowedFileName(file.name)) {
+      showSnackbar(
+        `Only ${ALLOWED_EXTS_LABEL} files are allowed.`,
+        "error"
+      );
       if (fileInputRef.current) fileInputRef.current.value = "";
       setUploadTargetId(null);
       return;
@@ -471,12 +487,12 @@ const Design = () => {
         { headers: { Authorization: `Bearer ${token}` } }
       );
       showSnackbar(
-        res.data?.message || "CAD file uploaded successfully",
+        res.data?.message || "File uploaded successfully",
         "success"
       );
       fetchDesigns();
     } catch (err) {
-      handleApiError(err, "Failed to upload CAD file");
+      handleApiError(err, "Failed to upload file");
     } finally {
       setUploading(false);
       setUploadTargetId(null);
@@ -487,7 +503,7 @@ const Design = () => {
   /* ---------------- CAD download ---------------- */
   const handleDownloadCAD = async (record) => {
     if (!record?.drawingFileName) {
-      showSnackbar("No CAD file uploaded for this design", "error");
+      showSnackbar("No file uploaded for this design", "error");
       return;
     }
 
@@ -512,7 +528,7 @@ const Design = () => {
 
       showSnackbar("Download started", "success");
     } catch (err) {
-      let msg = "Failed to download CAD file";
+      let msg = "Failed to download file";
       try {
         if (err.response?.data instanceof Blob) {
           const text = await err.response.data.text();
@@ -612,9 +628,10 @@ const Design = () => {
         maxWidth: "100%"
       }}
     >
+      {/* ✅ accept all four extensions */}
       <input
         type="file"
-        accept=".dwg"
+        accept={FILE_ACCEPT_ATTR}
         ref={fileInputRef}
         style={{ display: "none" }}
         onChange={handleCADFileSelected}
@@ -996,8 +1013,8 @@ const Design = () => {
                             }}
                             title={
                               r.drawingFileName
-                                ? "Replace existing .dwg"
-                                : "Upload .dwg"
+                                ? `Replace existing file (${ALLOWED_EXTS_LABEL})`
+                                : `Upload file (${ALLOWED_EXTS_LABEL})`
                             }
                           >
                             {uploading && uploadTargetId === r._id ? (
@@ -1291,7 +1308,7 @@ const Design = () => {
           </DialogActions>
         </Dialog>
 
-        {/* --- REPLACE EXISTING CAD CONFIRMATION DIALOG --- */}
+        {/* --- REPLACE EXISTING FILE CONFIRMATION DIALOG --- */}
         <Dialog
           open={replaceDialogOpen}
           onClose={handleReplaceDialogClose}
@@ -1310,11 +1327,11 @@ const Design = () => {
             }}
           >
             <WarningIcon sx={{ color: "#f57c00", fontSize: 32 }} />
-            <Typography variant="h6">Replace existing CAD file?</Typography>
+            <Typography variant="h6">Replace existing file?</Typography>
           </DialogTitle>
           <DialogContent dividers sx={lightStyles.dialogContent}>
             <Typography variant="body1" gutterBottom>
-              This design already has a CAD file uploaded. Uploading a new one
+              This design already has a file uploaded. Uploading a new one
               will overwrite the existing file on the server.
             </Typography>
             {replaceTarget && (
@@ -1348,6 +1365,9 @@ const Design = () => {
                 </Typography>
               </Box>
             )}
+            <Alert severity="info" sx={{ mt: 1 }}>
+              Allowed formats: <strong>{ALLOWED_EXTS_LABEL}</strong>
+            </Alert>
             <Alert severity="warning" sx={{ mt: 1 }}>
               The previous file will be permanently lost.
             </Alert>

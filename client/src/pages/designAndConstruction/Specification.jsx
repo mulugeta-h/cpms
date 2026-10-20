@@ -1,5 +1,11 @@
 // pages/Specification.jsx
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+} from "react";
 import {
   Box,
   Typography,
@@ -30,7 +36,7 @@ import {
   FormControl,
   InputLabel,
   Select,
-  MenuItem
+  MenuItem,
 } from "@mui/material";
 import {
   Refresh as RefreshIcon,
@@ -40,18 +46,18 @@ import {
   Search as SearchIcon,
   Close as CloseIcon,
   Person as PersonIcon,
-  Warning as WarningIcon
+  Warning as WarningIcon,
 } from "@mui/icons-material";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
-import { jwtDecode } from "jwt-decode";
 
 const API_URL = `${import.meta.env.VITE_API_URL}/api/specifications`;
-const INPROGRESS_ESTIMATION_IDS_URL = `${API_URL}/inprogress-estimation-ids`;
+const INPROGRESS_DC_IDS_URL = `${API_URL}/inprogress-dcids`;
 
 const STATUS_OPTIONS = ["In Progress", "Completed", "Rejected", "Cancelled"];
 
-/* ---------------- Pure helpers ---------------- */
+/* ---------------- Pure helpers (hoisted) ---------------- */
+
 const getToday = () => {
   const d = new Date();
   const offset = d.getTimezoneOffset();
@@ -69,27 +75,25 @@ const toDateInput = (value) => {
   return `${yyyy}-${mm}-${dd}`;
 };
 
-// "ESTREQ-001 (John Doe — Addis Ababa)"
-const formatEstimationLabel = (opt) => {
+const formatDCLabel = (opt) => {
   if (!opt) return "";
-  const id = String(opt.estimationId || "").trim();
-  const applicant = String(opt.applicantName || "").trim();
-  const address = String(opt.propertyAddress || "").trim();
-  const suffix = [applicant, address].filter(Boolean).join(" — ");
-  return suffix ? `${id} (${suffix})` : id;
+  const id = String(opt.DCId || "").trim();
+  const place = String(opt.placeofSite || "").trim();
+  return place ? `${id} (${place})` : id;
 };
 
 const makeEmptySpec = () => ({
-  estimationId: "",
+  DCId: "",
   siteVisitDate: getToday(),
   siteVisitPurpose: "",
   specReleaseDate: getToday(),
   branchHandOverDate: getToday(),
   acceptedBy: "",
-  remark: ""
+  remark: "",
 });
 
 /* ---------------- Shared styles ---------------- */
+
 const Transition = React.forwardRef(function Transition(props, ref) {
   return <Slide direction="up" ref={ref} {...props} />;
 });
@@ -100,8 +104,8 @@ const yellowButton = {
   fontWeight: "bold",
   "&:hover": {
     background: "#ffcc00",
-    boxShadow: "0 4px 12px rgba(255, 214, 0, 0.5)"
-  }
+    boxShadow: "0 4px 12px rgba(255, 214, 0, 0.5)",
+  },
 };
 
 const FIELD_HEIGHT = 40;
@@ -113,10 +117,10 @@ const inputSx = {
     minHeight: FIELD_HEIGHT,
     "& fieldset": { borderColor: "#e0e0e0" },
     "&:hover fieldset": { borderColor: "#FFD600" },
-    "&.Mui-focused fieldset": { borderColor: "#FFD600" }
+    "&.Mui-focused fieldset": { borderColor: "#FFD600" },
   },
   "& .MuiOutlinedInput-input": { padding: "8.5px 12px" },
-  "& .MuiInputLabel-root": { color: "#666666" }
+  "& .MuiInputLabel-root": { color: "#666666" },
 };
 
 const selectSx = {
@@ -125,8 +129,8 @@ const selectSx = {
   "& .MuiSelect-select": {
     padding: "8.5px 12px",
     minHeight: "1.4375em",
-    display: "block"
-  }
+    display: "block",
+  },
 };
 
 const lightStyles = {
@@ -135,13 +139,13 @@ const lightStyles = {
     border: "1px solid #e0e0e0",
     borderRadius: "12px",
     color: "#000000",
-    boxShadow: "0 4px 20px rgba(0, 0, 0, 0.05)"
+    boxShadow: "0 4px 20px rgba(0, 0, 0, 0.05)",
   },
   dialogPaper: {
     bgcolor: "#ffffff",
     border: "1px solid #FFD600",
     color: "#000000",
-    borderRadius: "12px"
+    borderRadius: "12px",
   },
   tableHeader: {
     color: "#000000",
@@ -151,12 +155,12 @@ const lightStyles = {
     position: "sticky",
     top: 0,
     zIndex: 2,
-    whiteSpace: "nowrap"
+    whiteSpace: "nowrap",
   },
   tableCell: {
     color: "#000000",
     borderBottom: "1px solid #e0e0e0",
-    whiteSpace: "nowrap"
+    whiteSpace: "nowrap",
   },
   actionBtn: {
     background: "#FFD600",
@@ -164,58 +168,39 @@ const lightStyles = {
     fontWeight: "bold",
     "&:hover": {
       background: "#ffcc00",
-      boxShadow: "0 0 15px #FFD600"
-    }
+      boxShadow: "0 0 15px #FFD600",
+    },
   },
   dialogContent: { px: 3, py: 2.5 },
   dialogActions: {
     px: 3,
     py: 2,
     borderTop: "1px solid #eee",
-    gap: 1
-  }
+    gap: 1,
+  },
 };
 
 const scrollbarStyles = {
   "&::-webkit-scrollbar": { width: "8px", height: "8px" },
   "&::-webkit-scrollbar-track": {
     backgroundColor: "#f1f1f1",
-    borderRadius: "4px"
+    borderRadius: "4px",
   },
   "&::-webkit-scrollbar-thumb": {
     backgroundColor: "#DAA520",
     borderRadius: "4px",
-    "&:hover": { backgroundColor: "#b8860b" }
-  }
+    "&:hover": { backgroundColor: "#b8860b" },
+  },
 };
 
 const Specification = () => {
   const token = localStorage.getItem("token");
   const navigate = useNavigate();
 
-  const getLoggedInUserFromToken = useCallback(() => {
-    try {
-      if (!token) return null;
-      const decoded = jwtDecode(token);
-      const userData = decoded.user || decoded;
-      return {
-        id: userData.id || userData._id || userData.sub,
-        name: userData.name || userData.fullName || userData.username,
-        username: userData.username || userData.name,
-        role: userData.role || userData.userRole,
-        email: userData.email,
-        fullName: userData.fullName || userData.name
-      };
-    } catch (error) {
-      console.error("Error decoding token:", error);
-      return null;
-    }
-  }, [token]);
-
   /* ---------------- State ---------------- */
   const [specs, setSpecs] = useState([]);
-  const [estimationOptions, setEstimationOptions] = useState([]);
-  const [selectedEstimationId, setSelectedEstimationId] = useState("");
+  const [dcIdOptions, setDcIdOptions] = useState([]);
+  const [selectedDCId, setSelectedDCId] = useState("");
   const [statusFilter, setStatusFilter] = useState("All Statuses");
   const [newSpec, setNewSpec] = useState(makeEmptySpec);
   const [editId, setEditId] = useState(null);
@@ -224,7 +209,7 @@ const Specification = () => {
   const [snackbar, setSnackbar] = useState({
     open: false,
     message: "",
-    severity: "success"
+    severity: "success",
   });
   const [selectedRowId, setSelectedRowId] = useState(null);
 
@@ -235,34 +220,58 @@ const Specification = () => {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(50);
 
+  /* ---------------- Abort controllers ---------------- */
+  const specsAbortRef = useRef(null);
+  const dcIdsAbortRef = useRef(null);
+
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
 
-  const showSnackbar = (msg, severity = "success") =>
-    setSnackbar({ open: true, message: msg, severity });
+  /* ---------------- Helpers ---------------- */
+  const showSnackbar = useCallback(
+    (msg, severity = "success") =>
+      setSnackbar({ open: true, message: msg, severity }),
+    []
+  );
 
-  /* ---------------- Lookup map ---------------- */
-  const estimationLabelById = useMemo(() => {
+  const handleApiError = useCallback(
+    (err, fallbackMsg = "Operation Failed") => {
+      console.error(fallbackMsg, err);
+      showSnackbar(err.response?.data?.message || fallbackMsg, "error");
+      if (err.response?.status === 401) {
+        localStorage.removeItem("token");
+        navigate("/login");
+      }
+    },
+    [showSnackbar, navigate]
+  );
+
+  /* ---------------- Lookup map: DCId -> label ---------------- */
+  const dcLabelById = useMemo(() => {
     const m = new Map();
-    estimationOptions.forEach((o) => {
-      const key = String(o.estimationId || "").trim();
-      if (key) m.set(key, formatEstimationLabel(o));
+    dcIdOptions.forEach((o) => {
+      const key = String(o.DCId || "").trim();
+      if (key) m.set(key, formatDCLabel(o));
     });
     return m;
-  }, [estimationOptions]);
+  }, [dcIdOptions]);
 
-  /* ---------------- Fetch In-Progress Estimation Ids ---------------- */
-  const fetchEstimationIds = useCallback(async () => {
+  /* ---------------- Fetch In-Progress DC Ids ---------------- */
+  const fetchDCIds = useCallback(async () => {
+    if (dcIdsAbortRef.current) dcIdsAbortRef.current.abort();
+    const controller = new AbortController();
+    dcIdsAbortRef.current = controller;
+
     try {
-      const res = await axios.get(INPROGRESS_ESTIMATION_IDS_URL, {
-        headers: { Authorization: `Bearer ${token}` }
+      const res = await axios.get(INPROGRESS_DC_IDS_URL, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: controller.signal,
       });
-      setEstimationOptions(
-        Array.isArray(res.data?.data) ? res.data.data : []
-      );
+      setDcIdOptions(Array.isArray(res.data?.data) ? res.data.data : []);
     } catch (err) {
-      console.error("Failed to fetch in-progress estimation ids:", err);
-      setEstimationOptions([]);
+      if (axios.isCancel(err) || err.name === "CanceledError") return;
+      console.error("[fetchDCIds] error:", err);
+      setDcIdOptions([]);
       if (err.response?.status === 401) {
         localStorage.removeItem("token");
         navigate("/login");
@@ -270,32 +279,39 @@ const Specification = () => {
     }
   }, [token, navigate]);
 
-  /* ---------------- Fetch specifications (all) ---------------- */
+  /* ---------------- Fetch specifications (all, once) ---------------- */
   const fetchSpecs = useCallback(async () => {
+    if (specsAbortRef.current) specsAbortRef.current.abort();
+    const controller = new AbortController();
+    specsAbortRef.current = controller;
+
     try {
       setLoading(true);
       const res = await axios.get(API_URL, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { Authorization: `Bearer ${token}` },
+        signal: controller.signal,
       });
-      setSpecs(Array.isArray(res.data.data) ? res.data.data : []);
+      setSpecs(Array.isArray(res.data?.data) ? res.data.data : []);
     } catch (err) {
-      showSnackbar("Failed to fetch specifications", "error");
-      if (err.response?.status === 401) {
-        localStorage.removeItem("token");
-        navigate("/login");
-      }
+      if (axios.isCancel(err) || err.name === "CanceledError") return;
+      handleApiError(err, "Failed to fetch specifications");
     } finally {
-      setLoading(false);
+      if (specsAbortRef.current === controller) setLoading(false);
     }
-  }, [token, navigate]);
+  }, [token, handleApiError]);
 
+  /* ---------------- Initial load (single effect) ---------------- */
   useEffect(() => {
     const init = async () => {
-      await fetchEstimationIds();
+      await fetchDCIds();
       await fetchSpecs();
     };
     init();
-  }, [fetchEstimationIds, fetchSpecs]);
+  }, [fetchDCIds, fetchSpecs]);
+
+  useEffect(() => {
+    setPage(0);
+  }, [statusFilter, selectedDCId, searchTerm]);
 
   /* ---------------- Form handlers ---------------- */
   const handleSpecChange = (e) => {
@@ -304,51 +320,43 @@ const Specification = () => {
   };
 
   const saveSpec = async () => {
-    if (!newSpec.estimationId?.trim()) {
-      return showSnackbar("Estimation Id is required", "error");
+    if (!newSpec.DCId?.trim()) {
+      return showSnackbar("DC Id is required", "error");
     }
 
     try {
       setLoading(true);
       const specData = {
-        estimationId: newSpec.estimationId,
+        DCId: newSpec.DCId,
         siteVisitDate: newSpec.siteVisitDate || null,
         siteVisitPurpose: newSpec.siteVisitPurpose || "",
         specReleaseDate: newSpec.specReleaseDate || null,
         branchHandOverDate: newSpec.branchHandOverDate || null,
-        remark: newSpec.remark || ""
+        remark: newSpec.remark || "",
       };
       if (editId) specData.acceptedBy = newSpec.acceptedBy || "";
 
-      let response;
-      if (editId) {
-        response = await axios.put(`${API_URL}/${editId}`, specData, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        showSnackbar(
-          response.data.message || "Specification updated successfully"
-        );
-      } else {
-        response = await axios.post(API_URL, specData, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        showSnackbar(
-          response.data.message || "Specification created successfully"
-        );
-      }
+      const response = editId
+        ? await axios.put(`${API_URL}/${editId}`, specData, {
+            headers: { Authorization: `Bearer ${token}` },
+          })
+        : await axios.post(API_URL, specData, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
 
+      showSnackbar(
+        response.data.message ||
+          (editId
+            ? "Specification updated successfully"
+            : "Specification created successfully")
+      );
       setFormOpen(false);
       setEditId(null);
       setNewSpec(makeEmptySpec());
       fetchSpecs();
-      fetchEstimationIds();
+      fetchDCIds();
     } catch (err) {
-      const serverMsg = err.response?.data?.message || "Operation Failed";
-      showSnackbar(serverMsg, "error");
-      if (err.response?.status === 401) {
-        localStorage.removeItem("token");
-        navigate("/login");
-      }
+      handleApiError(err);
     } finally {
       setLoading(false);
     }
@@ -369,37 +377,33 @@ const Specification = () => {
     if (!selectedRecord) return;
     try {
       const res = await axios.delete(`${API_URL}/${selectedRecord._id}`, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { Authorization: `Bearer ${token}` },
       });
       showSnackbar(
         res.data.message || "Specification deleted successfully",
         "warning"
       );
       fetchSpecs();
-      fetchEstimationIds();
+      fetchDCIds();
     } catch (err) {
-      showSnackbar(err.response?.data?.message || "Delete Failed", "error");
-      if (err.response?.status === 401) {
-        localStorage.removeItem("token");
-        navigate("/login");
-      }
+      handleApiError(err, "Delete Failed");
     } finally {
       handleDeleteDialogClose();
     }
   };
 
-  /* ---------------- Filtering + pagination ---------------- */
+  /* ---------------- Filtering + pagination (client-side) ------------ */
   const filteredSpecs = useMemo(() => {
     let filtered = specs;
 
     if (statusFilter && statusFilter !== "All Statuses") {
       filtered = filtered.filter((r) => r.status === statusFilter);
     }
-    if (selectedEstimationId) {
-      filtered = filtered.filter(
-        (r) => r.estimationId === selectedEstimationId
-      );
+
+    if (selectedDCId) {
+      filtered = filtered.filter((r) => r.DCId === selectedDCId);
     }
+
     if (searchTerm) {
       const searchLower = searchTerm.toLowerCase();
       filtered = filtered.filter((r) =>
@@ -408,8 +412,9 @@ const Specification = () => {
         )
       );
     }
+
     return filtered;
-  }, [specs, searchTerm, statusFilter, selectedEstimationId]);
+  }, [specs, searchTerm, statusFilter, selectedDCId]);
 
   const paginatedSpecs = useMemo(
     () =>
@@ -426,7 +431,6 @@ const Specification = () => {
     setPage(0);
   };
 
-  /* ---------------- Helpers ---------------- */
   const getTableHeight = () => {
     const availableHeight = window.innerHeight - (isMobile ? 360 : 300);
     return `${Math.max(availableHeight, 400)}px`;
@@ -435,13 +439,13 @@ const Specification = () => {
   const handleEditSpec = (spec) => {
     setEditId(spec._id);
     setNewSpec({
-      estimationId: spec.estimationId || "",
+      DCId: spec.DCId || "",
       siteVisitDate: toDateInput(spec.siteVisitDate),
       siteVisitPurpose: spec.siteVisitPurpose || "",
       specReleaseDate: toDateInput(spec.specReleaseDate),
       branchHandOverDate: toDateInput(spec.branchHandOverDate),
       acceptedBy: spec.acceptedBy || "",
-      remark: spec.remark || ""
+      remark: spec.remark || "",
     });
     setFormOpen(true);
   };
@@ -462,7 +466,7 @@ const Specification = () => {
         bgcolor: "#f5f5f5",
         py: isMobile ? 1 : 2,
         width: "100%",
-        maxWidth: "100%"
+        maxWidth: "100%",
       }}
     >
       <Box sx={{ width: "100%", px: { xs: 1, sm: 1, md: 0.5 } }}>
@@ -476,7 +480,7 @@ const Specification = () => {
             flexWrap: "wrap",
             alignItems: "center",
             justifyContent: "space-between",
-            gap: 2
+            gap: 2,
           }}
         >
           <Stack
@@ -500,7 +504,7 @@ const Specification = () => {
               sx={{
                 ...inputSx,
                 minWidth: isMobile ? "100%" : "300px",
-                flexGrow: 1
+                flexGrow: 1,
               }}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
@@ -516,7 +520,7 @@ const Specification = () => {
                       <CloseIcon fontSize="small" />
                     </IconButton>
                   </InputAdornment>
-                )
+                ),
               }}
             />
 
@@ -544,13 +548,13 @@ const Specification = () => {
             <IconButton
               onClick={() => {
                 fetchSpecs();
-                fetchEstimationIds();
+                fetchDCIds();
                 showSnackbar("✅ Table updated", "success");
               }}
               sx={{
                 ...yellowButton,
                 background: "transparent",
-                border: "1px solid #FFD600"
+                border: "1px solid #FFD600",
               }}
             >
               <RefreshIcon fontSize="small" />
@@ -567,7 +571,7 @@ const Specification = () => {
                 px: 1.5,
                 py: 0.5,
                 borderRadius: "4px",
-                bgcolor: "rgba(255,214,0,0.05)"
+                bgcolor: "rgba(255,214,0,0.05)",
               }}
             >
               {filteredSpecs.length} records
@@ -580,7 +584,7 @@ const Specification = () => {
           sx={{
             borderRadius: "8px",
             overflow: "hidden",
-            border: "1px solid #e0e0e0"
+            border: "1px solid #e0e0e0",
           }}
         >
           <TableContainer
@@ -588,7 +592,7 @@ const Specification = () => {
               height: getTableHeight(),
               maxHeight: getTableHeight(),
               overflow: "auto",
-              ...scrollbarStyles
+              ...scrollbarStyles,
             }}
           >
             {loading ? (
@@ -604,22 +608,19 @@ const Specification = () => {
                   width: "100%",
                   "& .MuiTableCell-root": {
                     whiteSpace: "nowrap",
-                    padding: "10px 12px"
-                  }
+                    padding: "10px 12px",
+                  },
                 }}
               >
                 <TableHead>
                   <TableRow>
                     {[
                       "#",
-                      "Estimation Id",
+                      "DC Id",
                       "Requested by",
-                      "Request Date",
-                      "Applicant",
-                      "Property Owner",
-                      "Property Address",
-                      "Purpose",
-                      "Type",
+                      "Request Type",
+                      "Requested Date",
+                      "Place of site",
                       "Assigned Engineer",
                       "Site Visit Date",
                       "Site Visit Purpose",
@@ -628,7 +629,7 @@ const Specification = () => {
                       "Accepted By",
                       "Remark",
                       "Status",
-                      "Actions"
+                      "Actions",
                     ].map((h) => (
                       <TableCell key={h} sx={lightStyles.tableHeader}>
                         {h}
@@ -641,7 +642,7 @@ const Specification = () => {
                   {paginatedSpecs.length === 0 ? (
                     <TableRow>
                       <TableCell
-                        colSpan={18}
+                        colSpan={15}
                         sx={{ textAlign: "center", py: 4, color: "#666" }}
                       >
                         No specifications found
@@ -666,9 +667,9 @@ const Specification = () => {
                             bgcolor:
                               selectedRowId === r._id
                                 ? "#ff790c"
-                                : "rgba(255, 214, 0, 0.1)"
+                                : "rgba(255, 214, 0, 0.1)",
                           },
-                          transition: "background-color 0.2s ease"
+                          transition: "background-color 0.2s ease",
                         }}
                       >
                         <TableCell sx={lightStyles.tableCell}>
@@ -679,15 +680,20 @@ const Specification = () => {
                           sx={{
                             ...lightStyles.tableCell,
                             fontWeight: "bold",
-                            color: "#242321"
+                            color: "#242321",
                           }}
                         >
-                          {estimationLabelById.get(r.estimationId) ||
-                            r.estimationId}
+                          {dcLabelById.get(r.DCId) || r.DCId}
                         </TableCell>
 
                         <TableCell sx={lightStyles.tableCell}>
                           {r.requestingOrgan || "—"}
+                        </TableCell>
+
+                        <TableCell sx={lightStyles.tableCell}>
+                          <Typography variant="body2">
+                            {r.requestType || "—"}
+                          </Typography>
                         </TableCell>
 
                         <TableCell sx={lightStyles.tableCell}>
@@ -697,58 +703,17 @@ const Specification = () => {
                         </TableCell>
 
                         <TableCell sx={lightStyles.tableCell}>
-                          {r.applicantName || "—"}
-                        </TableCell>
-
-                        <TableCell sx={lightStyles.tableCell}>
-                          {r.propertyOwner || "—"}
-                        </TableCell>
-
-                        <TableCell sx={lightStyles.tableCell}>
-                          <Tooltip title={r.propertyAddress || "—"}>
+                          <Tooltip title={r.placeofSite || "—"}>
                             <Typography
                               variant="body2"
                               sx={{
-                                maxWidth: 200,
+                                maxWidth: 220,
                                 overflow: "hidden",
                                 textOverflow: "ellipsis",
-                                whiteSpace: "nowrap"
+                                whiteSpace: "nowrap",
                               }}
                             >
-                              {r.propertyAddress || "—"}
-                            </Typography>
-                          </Tooltip>
-                        </TableCell>
-
-                        <TableCell sx={lightStyles.tableCell}>
-                          <Tooltip title={r.purposeOfValuation || "—"}>
-                            <Typography
-                              variant="body2"
-                              sx={{
-                                maxWidth: 140,
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                                whiteSpace: "nowrap"
-                              }}
-                            >
-                              {r.purposeOfValuation || "—"}
-                            </Typography>
-                          </Tooltip>
-                        </TableCell>
-
-                        <TableCell sx={lightStyles.tableCell}>
-                          <Tooltip title={r.typeOfProperty || "—"}>
-                            <Typography
-                              variant="body2"
-                              sx={{
-                                width:"auto",
-                                maxWidth: 240,
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                                whiteSpace: "nowrap"
-                              }}
-                            >
-                              {r.typeOfProperty || "—"}
+                              {r.placeofSite || "—"}
                             </Typography>
                           </Tooltip>
                         </TableCell>
@@ -773,7 +738,7 @@ const Specification = () => {
                                 maxWidth: 160,
                                 overflow: "hidden",
                                 textOverflow: "ellipsis",
-                                whiteSpace: "nowrap"
+                                whiteSpace: "nowrap",
                               }}
                             >
                               {r.siteVisitPurpose || "—"}
@@ -809,7 +774,7 @@ const Specification = () => {
                                 maxWidth: 200,
                                 overflow: "hidden",
                                 textOverflow: "ellipsis",
-                                whiteSpace: "nowrap"
+                                whiteSpace: "nowrap",
                               }}
                             >
                               {r.remark || "—"}
@@ -829,8 +794,8 @@ const Specification = () => {
                               color: "#000000",
                               "&:hover": {
                                 bgcolor: "#FFD600",
-                                color: "#000000"
-                              }
+                                color: "#000000",
+                              },
                             }}
                             onClick={(e) => {
                               e.stopPropagation();
@@ -846,8 +811,8 @@ const Specification = () => {
                               color: "#ff4444",
                               "&:hover": {
                                 bgcolor: "#ff0000",
-                                color: "#ffffff"
-                              }
+                                color: "#ffffff",
+                              },
                             }}
                             onClick={(e) => {
                               e.stopPropagation();
@@ -878,12 +843,12 @@ const Specification = () => {
               borderTop: "1px solid #e0e0e0",
               bgcolor: "#ffffff",
               "& .MuiTablePagination-selectIcon": { color: "#FFD600" },
-              "& .MuiIconButton-root": { color: "#FFD600" }
+              "& .MuiIconButton-root": { color: "#FFD600" },
             }}
           />
         </Paper>
 
-        {/* --- CREATE / EDIT DIALOG --- */}
+        {/* --- CREATE/EDIT DIALOG --- */}
         <Dialog
           open={formOpen}
           onClose={() => setFormOpen(false)}
@@ -896,8 +861,8 @@ const Specification = () => {
               borderRadius: "12px",
               width: { xs: "95%", sm: "640px" },
               margin: "auto",
-              overflowX: "hidden"
-            }
+              overflowX: "hidden",
+            },
           }}
         >
           <DialogTitle
@@ -910,7 +875,7 @@ const Specification = () => {
               px: 2,
               display: "flex",
               justifyContent: "space-between",
-              alignItems: "center"
+              alignItems: "center",
             }}
           >
             <Typography variant="h6" fontWeight="900">
@@ -926,8 +891,8 @@ const Specification = () => {
                 transition: "0.2s",
                 "&:hover": {
                   color: "#ff0000",
-                  backgroundColor: "rgba(255, 0, 0, 0.05)"
-                }
+                  backgroundColor: "rgba(255, 0, 0, 0.05)",
+                },
               }}
             >
               <CloseIcon fontSize="small" />
@@ -941,7 +906,7 @@ const Specification = () => {
               display: "grid",
               gridTemplateColumns: { xs: "1fr", sm: "repeat(2, 1fr)" },
               gap: 2.5,
-              overflowX: "hidden"
+              overflowX: "hidden",
             }}
           >
             <FormControl
@@ -949,41 +914,32 @@ const Specification = () => {
               size="small"
               sx={{ ...selectSx, mt: 2.5 }}
             >
-              <InputLabel id="estimation-form-label">
-                Estimation Id *
-              </InputLabel>
+              <InputLabel id="dcid-form-label">DC Id *</InputLabel>
               <Select
-                labelId="estimation-form-label"
-                label="Estimation Id *"
-                name="estimationId"
-                value={newSpec.estimationId || ""}
+                labelId="dcid-form-label"
+                label="DC Id *"
+                name="DCId"
+                value={newSpec.DCId || ""}
                 onChange={handleSpecChange}
                 sx={selectSx}
                 renderValue={(selected) => {
                   if (!selected) {
                     return (
-                      <em style={{ color: "#999" }}>
-                        Select Estimation Id…
-                      </em>
+                      <em style={{ color: "#999" }}>Select DC Id…</em>
                     );
                   }
-                  const found = estimationOptions.find(
-                    (o) => o.estimationId === selected
-                  );
-                  return found ? formatEstimationLabel(found) : selected;
+                  const found = dcIdOptions.find((o) => o.DCId === selected);
+                  return found ? formatDCLabel(found) : selected;
                 }}
               >
-                {estimationOptions.length === 0 ? (
+                {dcIdOptions.length === 0 ? (
                   <MenuItem value="" disabled>
-                    No In-Progress Estimation Ids available
+                    No In-Progress DC Ids available
                   </MenuItem>
                 ) : (
-                  estimationOptions.map((opt) => (
-                    <MenuItem
-                      key={opt.estimationId}
-                      value={opt.estimationId}
-                    >
-                      {formatEstimationLabel(opt)}
+                  dcIdOptions.map((opt) => (
+                    <MenuItem key={opt.DCId} value={opt.DCId}>
+                      {formatDCLabel(opt)}
                     </MenuItem>
                   ))
                 )}
@@ -1026,7 +982,7 @@ const Specification = () => {
                     <InputAdornment position="start">
                       <PersonIcon sx={{ color: "#FFD600" }} />
                     </InputAdornment>
-                  )
+                  ),
                 }}
               />
             )}
@@ -1076,7 +1032,7 @@ const Specification = () => {
                 color: "#888",
                 fontWeight: "bold",
                 textTransform: "none",
-                "&:hover": { color: "#444" }
+                "&:hover": { color: "#444" },
               }}
             >
               Cancel
@@ -1090,7 +1046,7 @@ const Specification = () => {
                 px: 4,
                 fontWeight: "bold",
                 textTransform: "none",
-                boxShadow: "none"
+                boxShadow: "none",
               }}
             >
               {loading ? (
@@ -1119,7 +1075,7 @@ const Specification = () => {
               alignItems: "center",
               gap: 2,
               px: 3,
-              py: 2.5
+              py: 2.5,
             }}
           >
             <WarningIcon sx={{ color: "#f44336", fontSize: 32 }} />
@@ -1136,7 +1092,7 @@ const Specification = () => {
                   mb: 2.5,
                   p: 2,
                   bgcolor: "#fff8e1",
-                  borderRadius: 2
+                  borderRadius: 2,
                 }}
               >
                 <Typography
@@ -1144,10 +1100,10 @@ const Specification = () => {
                   color="text.secondary"
                   display="block"
                 >
-                  Estimation Id:{" "}
+                  DC Id:{" "}
                   <strong>
-                    {estimationLabelById.get(selectedRecord.estimationId) ||
-                      selectedRecord.estimationId}
+                    {dcLabelById.get(selectedRecord.DCId) ||
+                      selectedRecord.DCId}
                   </strong>
                 </Typography>
                 <Typography
@@ -1155,19 +1111,19 @@ const Specification = () => {
                   color="text.secondary"
                   display="block"
                 >
-                  Applicant:{" "}
-                  <strong>{selectedRecord.applicantName || "—"}</strong>
+                  Accepted By:{" "}
+                  <strong>{selectedRecord.acceptedBy || "—"}</strong>
                 </Typography>
                 <Typography
                   variant="caption"
                   color="text.secondary"
                   display="block"
                 >
-                  Site Visit Date:{" "}
+                  Spec Release Date:{" "}
                   <strong>
-                    {selectedRecord.siteVisitDate
+                    {selectedRecord.specReleaseDate
                       ? new Date(
-                          selectedRecord.siteVisitDate
+                          selectedRecord.specReleaseDate
                         ).toLocaleDateString()
                       : "—"}
                   </strong>
@@ -1209,7 +1165,7 @@ const Specification = () => {
             sx={{
               bgcolor: "#ffffff",
               color: "#000000",
-              border: "1px solid #FFD600"
+              border: "1px solid #FFD600",
             }}
           >
             {snackbar.message}

@@ -1,9 +1,10 @@
+// models/Specification.js
 const mongoose = require("mongoose");
 
 const SpecificationSchema = new mongoose.Schema(
   {
-    // Reference to the original estimation Request
-    estimationId: {
+    // Reference to the original DCId Request
+    DCId: {
       type: String,
       required: true,
       trim: true,

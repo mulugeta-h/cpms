@@ -134,9 +134,8 @@ const ConstructionSchema = new mongoose.Schema(
     },
 
     percentage: {
-      type: String,
-      trim: true,
-      default: "",
+    type: Number,
+    default: 0,
     },
     
   },

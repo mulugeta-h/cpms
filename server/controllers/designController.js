@@ -23,6 +23,7 @@ const sanitizeForFilename = (str) =>
 // =========================
 const getInProgressDCIds = async (req, res) => {
   try {
+    console.log("vvvv zxx");
     const rows = await DCRequest.find(
       { status: "In Progress" },
       { DCId: 1, placeofSite: 1, _id: 0 }
@@ -143,6 +144,7 @@ const createDesign = async (req, res) => {
 // =========================
 const getAllDesigns = async (req, res) => {
   try {
+    console.log("vvvv zxx");
     const designs = await Design.aggregate([
       {
         $lookup: {
@@ -335,7 +337,23 @@ const upsertDesignByDCId = async (req, res) => {
 // UPLOAD - CAD (.dwg) for a Design
 // Saves file as <DCId>-<placeofSite>.dwg in /uploads/cad
 // =========================
-const uploadCAD = async (req, res) => {             // ✅ NEW
+// =========================
+// ALLOWED CAD / ARCHIVE EXTENSIONS
+// =========================
+const ALLOWED_CAD_EXTENSIONS = [".dwg", ".zip", ".rar", ".iso"]; // ✅ NEW
+const ALLOWED_MIME_HINTS = [
+  "application/zip",
+  "application/x-zip-compressed",
+  "application/x-rar-compressed",
+  "application/vnd.rar",
+  "application/x-iso9660-appimage",
+  "application/octet-stream",
+  "application/acad",
+  "image/vnd.dwg",
+  "image/x-dwg",
+];
+
+const uploadCAD = async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -346,20 +364,31 @@ const uploadCAD = async (req, res) => {             // ✅ NEW
       });
     }
 
-    // 1. Only .dwg allowed
+    // 1. Only .dwg / .zip / .rar / .iso allowed
     const originalName = req.file.originalname || "";
     const ext = path.extname(originalName).toLowerCase();
 
-    if (ext !== ".dwg") {
+    if (!ALLOWED_CAD_EXTENSIONS.includes(ext)) {
       return res.status(400).json({
         success: false,
-        message: "Only .dwg files are allowed.",
+        message: `Only ${ALLOWED_CAD_EXTENSIONS.join(", ")} files are allowed.`,
       });
+    }
+
+    // Optional: also check mimetype as a second layer
+    // (browsers are inconsistent, so we don't reject on this alone)
+    if (
+      req.file.mimetype &&
+      !ALLOWED_MIME_HINTS.includes(req.file.mimetype) &&
+      req.file.mimetype !== "application/octet-stream"
+    ) {
+      console.warn(
+        `[uploadCAD] Unusual mimetype for ${ext}: ${req.file.mimetype}`
+      );
     }
 
     // 2. Load Design to get DCId
     const design = await Design.findById(id);
-
     if (!design) {
       return res.status(404).json({
         success: false,
@@ -375,20 +404,35 @@ const uploadCAD = async (req, res) => {             // ✅ NEW
     const place = sanitizeForFilename(dcRequest?.placeofSite || "unknown");
     const dcIdSafe = sanitizeForFilename(design.DCId || id);
 
-    // 4. Build final name: DCId-placeofSite.dwg
-    const finalFileName = `${dcIdSafe}-${place}.dwg`;
+    // 4. Build final name: DCId-placeofSite<ext>
+    const finalFileName = `${dcIdSafe}-${place}${ext}`; // ✅ keep original ext
     const finalPath = path.join(CAD_DIR, finalFileName);
 
-    // 5. Write buffer to disk
+    // 5. If replacing an existing file with a *different* extension,
+    //    delete the old one so we don't leave orphan files.
+    if (
+      design.drawingFileName &&
+      design.drawingFileName !== finalFileName
+    ) {
+      const oldPath = path.join(
+        CAD_DIR,
+        path.basename(design.drawingFileName)
+      );
+      fs.promises.unlink(oldPath).catch(() => {
+        /* ignore if already gone */
+      });
+    }
+
+    // 6. Write buffer to disk
     fs.writeFileSync(finalPath, req.file.buffer);
 
-    // 6. Save on Design
+    // 7. Save on Design
     design.drawingFileName = finalFileName;
     await design.save();
 
     return res.status(200).json({
       success: true,
-      message: "CAD file uploaded successfully",
+      message: "File uploaded successfully",
       data: {
         drawingFileName: finalFileName,
         path: `/uploads/cad/${finalFileName}`,
@@ -397,10 +441,9 @@ const uploadCAD = async (req, res) => {             // ✅ NEW
     });
   } catch (error) {
     console.error("uploadCAD error:", error);
-
     return res.status(500).json({
       success: false,
-      message: "Failed to upload CAD file",
+      message: "Failed to upload file",
       error: error.message,
     });
   }

@@ -30,7 +30,11 @@ app.use("/api/DC-requests", require("./routes/DCRequestRoutes"));
 //excution routes
 app.use("/api/designs", require("./routes/designRoutes"));
 app.use("/api/specifications", require("./routes/specificationRoutes"));
-
+app.use("/api/construction",require("./routes/constructionRoutes"));
+app.use("/api/estimations", require("./routes/estimationRoutes"));
+//Reports routes
+app.use("/api/dc-reports", require("./routes/DCReportRoutes"));
+app.use("/api/estimation-reports", require("./routes/estimationReportRoutes"));
 app.get("/", (req, res) => {
   res.send("✅ Server is running successfully**!");
 });

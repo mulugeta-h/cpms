@@ -32,7 +32,6 @@ import {
   MenuItem,
   InputAdornment,
   Slide,
-  Autocomplete
 } from "@mui/material";
 import {
   Refresh as RefreshIcon,
@@ -48,7 +47,8 @@ import {
   Pending as PendingIcon,
   Engineering as EngineeringIcon,
   Place as PlaceIcon,
-  Category as CategoryIcon
+  Category as CategoryIcon,
+  FilterList as FilterListIcon,
 } from "@mui/icons-material";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
@@ -59,14 +59,14 @@ const USERS_URL = `${import.meta.env.VITE_API_URL}/api/dc-requests/getUsers`;
 
 // =====================================================
 // REQUEST TYPE OPTIONS
-// (freeSolo Autocomplete — user can also type their own)
 // =====================================================
 const REQUEST_TYPE_OPTIONS = [
   "New Branch",
   "Branch Relocation",
   "Branch modification",
   "Head office modification",
-  "maintenance"
+  "maintenance",
+  "Other"
 ];
 
 const EMPTY_REQUEST = {
@@ -75,22 +75,17 @@ const EMPTY_REQUEST = {
   requestDate: new Date().toISOString().split("T")[0],
   placeofSite: "",
   assignedBy: "",
-  assignedTo: "", // ⬅️ will hold USERNAME
-  status: "Pending"
+  assignedTo: "",
+  status: "Pending",
 };
 
-const STATUS_OPTIONS = [
-  "In Progress",
-  "Completed",
-  "Rejected",
-  "Cancelled"
-];
+const STATUS_OPTIONS = ["In Progress", "Completed", "Rejected"];
 
 const STATUS_COLORS = {
   "In Progress": "info",
   Completed: "success",
   Rejected: "error",
-  Cancelled: "default"
+  Cancelled: "default",
 };
 
 const Transition = React.forwardRef(function Transition(props, ref) {
@@ -103,13 +98,13 @@ const lightStyles = {
     border: "1px solid #e0e0e0",
     borderRadius: "12px",
     color: "#000000",
-    boxShadow: "0 4px 20px rgba(0, 0, 0, 0.05)"
+    boxShadow: "0 4px 20px rgba(0, 0, 0, 0.05)",
   },
   dialogPaper: {
     bgcolor: "#ffffff",
     border: "1px solid #FFD600",
     color: "#000000",
-    borderRadius: "12px"
+    borderRadius: "12px",
   },
   input: {
     "& .MuiOutlinedInput-root": {
@@ -118,7 +113,7 @@ const lightStyles = {
       minHeight: 40,
       "& fieldset": { borderColor: "#e0e0e0" },
       "&:hover fieldset": { borderColor: "#FFD600" },
-      "&.Mui-focused fieldset": { borderColor: "#FFD600" }
+      "&.Mui-focused fieldset": { borderColor: "#FFD600" },
     },
     "& .MuiOutlinedInput-input": { padding: "8.5px 12px" },
     "& .MuiInputLabel-root": { color: "#666666" },
@@ -126,8 +121,8 @@ const lightStyles = {
     "& .MuiSelect-select": {
       padding: "8.5px 12px",
       display: "flex",
-      alignItems: "center"
-    }
+      alignItems: "center",
+    },
   },
   tableHeader: {
     color: "#000000",
@@ -137,12 +132,12 @@ const lightStyles = {
     position: "sticky",
     top: 0,
     zIndex: 2,
-    whiteSpace: "nowrap"
+    whiteSpace: "nowrap",
   },
   tableCell: {
     color: "#000000",
     borderBottom: "1px solid #e0e0e0",
-    whiteSpace: "nowrap"
+    whiteSpace: "nowrap",
   },
   actionBtn: {
     background: "#FFD600",
@@ -150,28 +145,65 @@ const lightStyles = {
     fontWeight: "bold",
     "&:hover": {
       background: "#ffcc00",
-      boxShadow: "0 0 15px #FFD600"
-    }
+      boxShadow: "0 0 15px #FFD600",
+    },
   },
   dialogContent: { px: 3, py: 2.5 },
   dialogActions: {
     px: 3,
     py: 2,
     borderTop: "1px solid #eee",
-    gap: 1
-  }
+    gap: 1,
+  },
 };
 
 const scrollbarStyles = {
   "&::-webkit-scrollbar": { width: "8px", height: "8px" },
   "&::-webkit-scrollbar-track": {
     backgroundColor: "#f1f1f1",
-    borderRadius: "4px"
+    borderRadius: "4px",
   },
   "&::-webkit-scrollbar-thumb": {
     backgroundColor: "#DAA520",
     borderRadius: "4px",
-    "&:hover": { backgroundColor: "#b8860b" }
+    "&:hover": { backgroundColor: "#b8860b" },
+  },
+};
+
+// =====================================================
+// Small reusable helper: the inside-of-value icon row
+// =====================================================
+const SelectValueRow = ({ icon, text, placeholder }) => (
+  <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+    <Box
+      component="span"
+      sx={{ display: "inline-flex", alignItems: "center", color: "#FFD600" }}
+    >
+      {icon}
+    </Box>
+    {text ? (
+      <span>{text}</span>
+    ) : (
+      <em style={{ color: "#999" }}>{placeholder}</em>
+    )}
+  </Box>
+);
+
+// Icon for a given status
+const statusIcon = (status, fontSize = 18) => {
+  switch (status) {
+    case "Completed":
+      return <CheckCircleIcon sx={{ fontSize, color: "#4caf50" }} />;
+    case "Rejected":
+      return <CancelIcon sx={{ fontSize, color: "#f44336" }} />;
+    case "Cancelled":
+      return <CancelIcon sx={{ fontSize, color: "#ff9800" }} />;
+    case "In Progress":
+      return <PendingIcon sx={{ fontSize, color: "#2196f3" }} />;
+    case "Pending":
+      return <PendingIcon sx={{ fontSize, color: "#ff9800" }} />;
+    default:
+      return <PendingIcon sx={{ fontSize, color: "#FFD600" }} />;
   }
 };
 
@@ -190,7 +222,7 @@ const DCRequest = () => {
         username: userData.username || userData.name,
         role: userData.role || userData.userRole,
         email: userData.email,
-        fullName: userData.fullName || userData.name
+        fullName: userData.fullName || userData.name,
       };
     } catch (error) {
       console.error("Error decoding token:", error);
@@ -213,7 +245,7 @@ const DCRequest = () => {
   const [requests, setRequests] = useState([]);
   const [newRequest, setNewRequest] = useState({
     ...EMPTY_REQUEST,
-    assignedBy: getLoggedInDisplayName()
+    assignedBy: getLoggedInDisplayName(),
   });
   const [editId, setEditId] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
@@ -221,7 +253,7 @@ const DCRequest = () => {
   const [snackbar, setSnackbar] = useState({
     open: false,
     message: "",
-    severity: "success"
+    severity: "success",
   });
   const [selectedRowId, setSelectedRowId] = useState(null);
   const [users, setUsers] = useState([]);
@@ -247,7 +279,7 @@ const DCRequest = () => {
   const fetchUsers = useCallback(async () => {
     try {
       const res = await axios.get(USERS_URL, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { Authorization: `Bearer ${token}` },
       });
       let userList = [];
       if (Array.isArray(res.data?.data)) userList = res.data.data;
@@ -258,7 +290,6 @@ const DCRequest = () => {
         );
         if (foundArray) userList = foundArray;
       }
-      // Only keep users with a username — assignment keys off username
       setUsers(userList.filter((u) => u && u.username));
     } catch (err) {
       console.error("Failed to fetch users:", err);
@@ -271,7 +302,7 @@ const DCRequest = () => {
     try {
       setLoading(true);
       const res = await axios.get(API_URL, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { Authorization: `Bearer ${token}` },
       });
       setRequests(Array.isArray(res.data.data) ? res.data.data : []);
     } catch (err) {
@@ -322,20 +353,19 @@ const DCRequest = () => {
           : new Date(),
         placeofSite: newRequest.placeofSite,
         assignedBy: getLoggedInDisplayName(),
-        // ⬇️ assignedTo is the USERNAME, exactly as picked in the Select
         assignedTo: newRequest.assignedTo || "",
-        status: editId ? newRequest.status : "In Progress"
+        status: editId ? newRequest.status : "In Progress",
       };
 
       let response;
       if (editId) {
         response = await axios.put(`${API_URL}/${editId}`, requestData, {
-          headers: { Authorization: `Bearer ${token}` }
+          headers: { Authorization: `Bearer ${token}` },
         });
         showSnackbar(response.data.message || "DC request updated");
       } else {
         response = await axios.post(API_URL, requestData, {
-          headers: { Authorization: `Bearer ${token}` }
+          headers: { Authorization: `Bearer ${token}` },
         });
         showSnackbar(response.data.message || "DC request created");
       }
@@ -344,7 +374,7 @@ const DCRequest = () => {
       setEditId(null);
       setNewRequest({
         ...EMPTY_REQUEST,
-        assignedBy: getLoggedInDisplayName()
+        assignedBy: getLoggedInDisplayName(),
       });
       fetchRequests();
     } catch (err) {
@@ -416,7 +446,7 @@ const DCRequest = () => {
     if (!selectedRecord) return;
     try {
       const res = await axios.delete(`${API_URL}/${selectedRecord._id}`, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { Authorization: `Bearer ${token}` },
       });
       showSnackbar(res.data.message || "DC request deleted", "warning");
       fetchRequests();
@@ -472,14 +502,11 @@ const DCRequest = () => {
 
   const getStatusColor = (status) => STATUS_COLORS[status] || "default";
 
-  // Display name for a user object
   const getUserFullName = (user) => {
     if (!user) return "";
     return user.name || user.fullName || user.username || "";
   };
 
-  // Resolve assignedTo → display name. `assignedTo` holds USERNAME in
-  // new records, but may hold an ObjectId in legacy records.
   const getAssignedToDisplay = (assignedTo) => {
     if (!assignedTo) return "Unassigned";
 
@@ -495,7 +522,7 @@ const DCRequest = () => {
       ...request,
       requestDate: request.requestDate
         ? new Date(request.requestDate).toISOString().split("T")[0]
-        : new Date().toISOString().split("T")[0]
+        : new Date().toISOString().split("T")[0],
     };
     setEditId(request._id);
     setNewRequest(formattedRequest);
@@ -506,7 +533,7 @@ const DCRequest = () => {
     setEditId(null);
     setNewRequest({
       ...EMPTY_REQUEST,
-      assignedBy: getLoggedInDisplayName()
+      assignedBy: getLoggedInDisplayName(),
     });
     setFormOpen(true);
   };
@@ -524,8 +551,8 @@ const DCRequest = () => {
           "&:hover": {
             opacity: 0.8,
             transform: "scale(1.05)",
-            transition: "all 0.2s"
-          }
+            transition: "all 0.2s",
+          },
         }}
         onClick={(e) => {
           e.stopPropagation();
@@ -554,7 +581,7 @@ const DCRequest = () => {
         bgcolor: "#f5f5f5",
         py: isMobile ? 1 : 2,
         width: "100%",
-        maxWidth: "100%"
+        maxWidth: "100%",
       }}
     >
       <Box sx={{ width: "100%", px: { xs: 1, sm: 1, md: 0.5 } }}>
@@ -568,7 +595,7 @@ const DCRequest = () => {
             flexWrap: "wrap",
             alignItems: "center",
             justifyContent: "space-between",
-            gap: 2
+            gap: 2,
           }}
         >
           <Stack
@@ -592,7 +619,7 @@ const DCRequest = () => {
               sx={{
                 ...lightStyles.input,
                 minWidth: isMobile ? "100%" : "400px",
-                flexGrow: 1
+                flexGrow: 1,
               }}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
@@ -611,7 +638,7 @@ const DCRequest = () => {
                       <CloseIcon fontSize="small" />
                     </IconButton>
                   </InputAdornment>
-                )
+                ),
               }}
             />
 
@@ -623,27 +650,47 @@ const DCRequest = () => {
               sx={{
                 ...lightStyles.actionBtn,
                 background: "transparent",
-                border: "1px solid #FFD600"
+                border: "1px solid #FFD600",
               }}
             >
               <RefreshIcon fontSize="small" />
             </IconButton>
 
+            {/* ✅ Status filter — icon inside the value */}
             <FormControl
               size="small"
-              sx={{ minWidth: isMobile ? "100%" : "150px" }}
+              sx={{ minWidth: isMobile ? "100%" : "180px" }}
             >
-              <InputLabel>Status</InputLabel>
+              <InputLabel id="status-filter-label">Status</InputLabel>
               <Select
+                labelId="status-filter-label"
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
                 label="Status"
                 sx={lightStyles.input}
+                renderValue={(selected) => (
+                  <SelectValueRow
+                    icon={<FilterListIcon sx={{ fontSize: 18 }} />}
+                    text={selected}
+                    placeholder="Select status…"
+                  />
+                )}
               >
-                <MenuItem value="All Statuses">All Statuses</MenuItem>
+                <MenuItem value="All Statuses">
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <FilterListIcon
+                      fontSize="small"
+                      sx={{ color: "#FFD600" }}
+                    />
+                    <Typography>All Statuses</Typography>
+                  </Stack>
+                </MenuItem>
                 {STATUS_OPTIONS.map((status) => (
                   <MenuItem key={status} value={status}>
-                    {status}
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      {statusIcon(status, 18)}
+                      <Typography>{status}</Typography>
+                    </Stack>
                   </MenuItem>
                 ))}
               </Select>
@@ -660,7 +707,7 @@ const DCRequest = () => {
                 px: 1.5,
                 py: 0.5,
                 borderRadius: "4px",
-                bgcolor: "rgba(255,214,0,0.05)"
+                bgcolor: "rgba(255,214,0,0.05)",
               }}
             >
               {filteredRequests.length} records
@@ -673,7 +720,7 @@ const DCRequest = () => {
           sx={{
             borderRadius: "8px",
             overflow: "hidden",
-            border: "1px solid #e0e0e0"
+            border: "1px solid #e0e0e0",
           }}
         >
           <TableContainer
@@ -681,7 +728,7 @@ const DCRequest = () => {
               height: getTableHeight(),
               maxHeight: getTableHeight(),
               overflow: "auto",
-              ...scrollbarStyles
+              ...scrollbarStyles,
             }}
           >
             {loading ? (
@@ -697,8 +744,8 @@ const DCRequest = () => {
                   width: "100%",
                   "& .MuiTableCell-root": {
                     whiteSpace: "nowrap",
-                    padding: "10px 12px"
-                  }
+                    padding: "10px 12px",
+                  },
                 }}
               >
                 <TableHead>
@@ -712,7 +759,7 @@ const DCRequest = () => {
                       "Place of site",
                       "Assigned Engineer",
                       "Status",
-                      "Actions"
+                      "Actions",
                     ].map((h) => (
                       <TableCell key={h} sx={lightStyles.tableHeader}>
                         {h}
@@ -744,27 +791,26 @@ const DCRequest = () => {
                           cursor: "pointer",
                           backgroundColor:
                             selectedRowId === r._id
-                              ? "#ffb648f3"
+                              ? "#a5d6a7f3"          // selected — soft green
                               : "transparent",
                           "&:hover": {
                             bgcolor:
                               selectedRowId === r._id
-                                ? "#ff790c"
-                                : "rgba(255, 214, 0, 0.1)"
+                                ? "#66bb6a"          // selected + hover — deeper green
+                                : "rgba(76, 175, 80, 0.12)", // unselected hover — faint green
                           },
-                          transition: "background-color 0.2s ease"
+                          transition: "background-color 0.2s ease",
                         }}
                       >
                         <TableCell sx={lightStyles.tableCell}>
                           {page * rowsPerPage + i + 1}
                         </TableCell>
 
-                        {/* DC ID */}
                         <TableCell
                           sx={{
                             ...lightStyles.tableCell,
                             fontWeight: "bold",
-                            color: "#242321"
+                            color: "#242321",
                           }}
                         >
                           <Tooltip title={`DC ID: ${r.DCId || "—"}`}>
@@ -772,12 +818,10 @@ const DCRequest = () => {
                           </Tooltip>
                         </TableCell>
 
-                        {/* Requested by */}
                         <TableCell sx={lightStyles.tableCell}>
                           {r.requestingOrgan || "—"}
                         </TableCell>
 
-                        {/* Request Type */}
                         <TableCell sx={lightStyles.tableCell}>
                           <Stack
                             direction="row"
@@ -794,14 +838,12 @@ const DCRequest = () => {
                           </Stack>
                         </TableCell>
 
-                        {/* Requested Date */}
                         <TableCell sx={lightStyles.tableCell}>
                           {r.requestDate
                             ? new Date(r.requestDate).toLocaleDateString()
                             : "—"}
                         </TableCell>
 
-                        {/* Place of site */}
                         <TableCell sx={lightStyles.tableCell}>
                           <Tooltip title={r.placeofSite || "—"}>
                             <Stack
@@ -819,7 +861,7 @@ const DCRequest = () => {
                                   maxWidth: 220,
                                   overflow: "hidden",
                                   textOverflow: "ellipsis",
-                                  whiteSpace: "nowrap"
+                                  whiteSpace: "nowrap",
                                 }}
                               >
                                 {r.placeofSite || "—"}
@@ -828,7 +870,6 @@ const DCRequest = () => {
                           </Tooltip>
                         </TableCell>
 
-                        {/* Assigned Engineer — displays NAME, tooltip shows USERNAME */}
                         <TableCell sx={lightStyles.tableCell}>
                           <Tooltip
                             title={
@@ -853,12 +894,10 @@ const DCRequest = () => {
                           </Tooltip>
                         </TableCell>
 
-                        {/* Status */}
                         <TableCell sx={lightStyles.tableCell}>
                           {renderStatusChip(r)}
                         </TableCell>
 
-                        {/* Actions */}
                         <TableCell sx={lightStyles.tableCell}>
                           <IconButton
                             size="small"
@@ -866,8 +905,8 @@ const DCRequest = () => {
                               color: "#000000",
                               "&:hover": {
                                 bgcolor: "#FFD600",
-                                color: "#000000"
-                              }
+                                color: "#000000",
+                              },
                             }}
                             onClick={(e) => {
                               e.stopPropagation();
@@ -882,8 +921,8 @@ const DCRequest = () => {
                               color: "#ff4444",
                               "&:hover": {
                                 bgcolor: "#ff0000",
-                                color: "#ffffff"
-                              }
+                                color: "#ffffff",
+                              },
                             }}
                             onClick={(e) => {
                               e.stopPropagation();
@@ -914,7 +953,7 @@ const DCRequest = () => {
               borderTop: "1px solid #e0e0e0",
               bgcolor: "#ffffff",
               "& .MuiTablePagination-selectIcon": { color: "#FFD600" },
-              "& .MuiIconButton-root": { color: "#FFD600" }
+              "& .MuiIconButton-root": { color: "#FFD600" },
             }}
           />
         </Paper>
@@ -932,8 +971,8 @@ const DCRequest = () => {
               borderRadius: "12px",
               width: { xs: "95%", sm: "640px" },
               margin: "auto",
-              overflowX: "hidden"
-            }
+              overflowX: "hidden",
+            },
           }}
         >
           <DialogTitle
@@ -946,7 +985,7 @@ const DCRequest = () => {
               px: 2,
               display: "flex",
               justifyContent: "space-between",
-              alignItems: "center"
+              alignItems: "center",
             }}
           >
             <Typography variant="h6" fontWeight="900">
@@ -960,8 +999,8 @@ const DCRequest = () => {
                 transition: "0.2s",
                 "&:hover": {
                   color: "#ff0000",
-                  backgroundColor: "rgba(255, 0, 0, 0.05)"
-                }
+                  backgroundColor: "rgba(255, 0, 0, 0.05)",
+                },
               }}
             >
               <CloseIcon fontSize="small" />
@@ -975,10 +1014,10 @@ const DCRequest = () => {
               display: "grid",
               gridTemplateColumns: { xs: "1fr", sm: "repeat(2, 1fr)" },
               gap: 2.5,
-              overflowX: "hidden"
+              overflowX: "hidden",
             }}
           >
-            {/* Row 1 */}
+            {/* Requested by */}
             <TextField
               fullWidth
               label="Requested by (Organ) *"
@@ -990,52 +1029,57 @@ const DCRequest = () => {
               required
             />
 
-            {/* Request Type — freeSolo Autocomplete */}
-            <Autocomplete
+            {/* Request Type — icon inside the value */}
+            <FormControl
               fullWidth
-              freeSolo
               size="small"
-              options={REQUEST_TYPE_OPTIONS}
-              value={newRequest.requestType || ""}
-              onChange={(event, newValue) => {
-                setNewRequest((prev) => ({
-                  ...prev,
-                  requestType: newValue || ""
-                }));
-              }}
-              onInputChange={(event, newInputValue) => {
-                setNewRequest((prev) => ({
-                  ...prev,
-                  requestType: newInputValue || ""
-                }));
-              }}
-              renderInput={(params) => (
-                <TextField
-                  {...params}
-                  fullWidth
-                  label="Request Type *"
-                  size="small"
-                  sx={{ ...lightStyles.input, mt: 2.5 }}
-                  placeholder="Select or type request type"
-                  required
-                  InputProps={{
-                    ...params.InputProps,
-                    startAdornment: (
-                      <InputAdornment position="start">
-                        <CategoryIcon sx={{ color: "#FFD600" }} />
-                      </InputAdornment>
-                    )
-                  }}
-                />
-              )}
-              renderOption={(props, option) => (
-                <li {...props} key={option}>
-                  <Typography variant="body2">{option}</Typography>
-                </li>
-              )}
-            />
+              sx={{ ...lightStyles.input, mt: 2.5 }}
+            >
+              <InputLabel id="request-type-label">
+                Request Type *
+              </InputLabel>
+              <Select
+                labelId="request-type-label"
+                label="Request Type *"
+                value={newRequest.requestType || ""}
+                onChange={(e) =>
+                  setNewRequest((prev) => ({
+                    ...prev,
+                    requestType: e.target.value || "",
+                  }))
+                }
+                sx={lightStyles.input}
+                renderValue={(selected) => (
+                  <SelectValueRow
+                    icon={<CategoryIcon sx={{ fontSize: 18 }} />}
+                    text={selected}
+                    placeholder="Select request type…"
+                  />
+                )}
+                MenuProps={{
+                  PaperProps: {
+                    sx: {
+                      maxHeight: 320,
+                      "& .MuiMenuItem-root": { fontSize: "0.9rem" },
+                    },
+                  },
+                }}
+              >
+                {REQUEST_TYPE_OPTIONS.map((option) => (
+                  <MenuItem key={option} value={option}>
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      <CategoryIcon
+                        fontSize="small"
+                        sx={{ color: "#FFD600" }}
+                      />
+                      <Typography>{option}</Typography>
+                    </Stack>
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
 
-            {/* Row 2 */}
+            {/* Requested Date */}
             <TextField
               fullWidth
               label="Requested Date"
@@ -1047,6 +1091,8 @@ const DCRequest = () => {
               onChange={handleRequestChange}
               InputLabelProps={{ shrink: true }}
             />
+
+            {/* Place of site */}
             <TextField
               fullWidth
               label="Place of site *"
@@ -1056,9 +1102,16 @@ const DCRequest = () => {
               value={newRequest.placeofSite}
               onChange={handleRequestChange}
               required
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <PlaceIcon sx={{ color: "#FFD600" }} />
+                  </InputAdornment>
+                ),
+              }}
             />
 
-            {/* Row 3 */}
+            {/* Assigned By */}
             <TextField
               fullWidth
               label="Assigned By"
@@ -1068,8 +1121,8 @@ const DCRequest = () => {
                 ...lightStyles.input,
                 "& .MuiOutlinedInput-root": {
                   ...lightStyles.input["& .MuiOutlinedInput-root"],
-                  backgroundColor: "#f5f5f5"
-                }
+                  backgroundColor: "#f5f5f5",
+                },
               }}
               value={getLoggedInDisplayName()}
               disabled
@@ -1078,59 +1131,106 @@ const DCRequest = () => {
                   <InputAdornment position="start">
                     <PersonIcon sx={{ color: "#FFD600" }} />
                   </InputAdornment>
-                )
+                ),
               }}
             />
 
-            {/* Assigned Engineer — value stored in DB is USERNAME */}
-            <FormControl fullWidth size="small">
-              <InputLabel>Assigned Engineer</InputLabel>
+            {/* Assigned Engineer — icon inside the value */}
+            <FormControl fullWidth size="small" sx={lightStyles.input}>
+              <InputLabel id="assigned-to-label">
+                Assigned Engineer
+              </InputLabel>
               <Select
+                labelId="assigned-to-label"
                 name="assignedTo"
                 value={newRequest.assignedTo || ""}
                 onChange={handleRequestChange}
                 label="Assigned Engineer"
                 sx={lightStyles.input}
+                renderValue={(selected) => {
+                  if (!selected) {
+                    return (
+                      <SelectValueRow
+                        icon={<EngineeringIcon sx={{ fontSize: 18 }} />}
+                        text=""
+                        placeholder="Unassigned"
+                      />
+                    );
+                  }
+                  const u = users.find(
+                    (x) => x.username === selected || x._id === selected
+                  );
+                  return (
+                    <SelectValueRow
+                      icon={<EngineeringIcon sx={{ fontSize: 18 }} />}
+                      text={u ? getUserFullName(u) || u.username : selected}
+                      placeholder="Unassigned"
+                    />
+                  );
+                }}
+                MenuProps={{
+                  PaperProps: { sx: { maxHeight: 320 } },
+                }}
               >
                 <MenuItem value="">
-                  <em>Unassigned</em>
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <EngineeringIcon
+                      fontSize="small"
+                      sx={{ color: "#bdbdbd" }}
+                    />
+                    <em>Unassigned</em>
+                  </Stack>
                 </MenuItem>
                 {users.map((user) => (
-                  <MenuItem
-                    key={user.username}
-                    value={user.username} // ⬅️ USERNAME goes to DB
-                  >
-                    <Stack direction="column" spacing={0}>
-                      <Typography variant="body2">
-                        {user.username}
-                      </Typography>
-                      <Typography
-                        variant="caption"
-                        color="text.secondary"
-                        sx={{ fontSize: "0.7rem" }}
-                      >
-                       {getUserFullName(user) || user.username}
-                      </Typography>
+                  <MenuItem key={user.username} value={user.username}>
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      <EngineeringIcon
+                        fontSize="small"
+                        sx={{ color: "#FFD600" }}
+                      />
+                      <Stack direction="column" spacing={0}>
+                        <Typography variant="body2">
+                          {user.username}
+                        </Typography>
+                        <Typography
+                          variant="caption"
+                          color="text.secondary"
+                          sx={{ fontSize: "0.7rem" }}
+                        >
+                          {getUserFullName(user) || user.username}
+                        </Typography>
+                      </Stack>
                     </Stack>
                   </MenuItem>
                 ))}
               </Select>
             </FormControl>
 
-            {/* Status — edit only */}
+            {/* Status (edit only) — icon inside the value */}
             {editId && (
-              <FormControl fullWidth size="small">
-                <InputLabel>Status</InputLabel>
+              <FormControl fullWidth size="small" sx={lightStyles.input}>
+                <InputLabel id="status-edit-label">Status</InputLabel>
                 <Select
+                  labelId="status-edit-label"
                   name="status"
                   value={newRequest.status}
                   onChange={handleRequestChange}
                   label="Status"
                   sx={lightStyles.input}
+                  renderValue={(selected) => (
+                    <SelectValueRow
+                      icon={statusIcon(selected, 18)}
+                      text={selected}
+                      placeholder="Select status…"
+                    />
+                  )}
                 >
                   {STATUS_OPTIONS.map((status) => (
                     <MenuItem key={status} value={status}>
-                      {status}
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        {statusIcon(status, 18)}
+                        <Typography>{status}</Typography>
+                      </Stack>
                     </MenuItem>
                   ))}
                 </Select>
@@ -1147,7 +1247,7 @@ const DCRequest = () => {
                 color: "#888",
                 fontWeight: "bold",
                 textTransform: "none",
-                "&:hover": { color: "#444" }
+                "&:hover": { color: "#444" },
               }}
             >
               Cancel
@@ -1161,7 +1261,7 @@ const DCRequest = () => {
                 px: 4,
                 fontWeight: "bold",
                 textTransform: "none",
-                boxShadow: "none"
+                boxShadow: "none",
               }}
             >
               {loading ? (
@@ -1185,7 +1285,13 @@ const DCRequest = () => {
           PaperProps={{ sx: { borderRadius: "12px" } }}
         >
           <DialogTitle
-            sx={{ display: "flex", alignItems: "center", gap: 2, px: 3, py: 2.5 }}
+            sx={{
+              display: "flex",
+              alignItems: "center",
+              gap: 2,
+              px: 3,
+              py: 2.5,
+            }}
           >
             <PendingIcon sx={{ color: "#FFD600", fontSize: 32 }} />
             <Typography variant="h6">Update Status</Typography>
@@ -1201,7 +1307,7 @@ const DCRequest = () => {
                   mb: 2.5,
                   p: 2,
                   bgcolor: "#fff8e1",
-                  borderRadius: 2
+                  borderRadius: 2,
                 }}
               >
                 <Typography
@@ -1236,33 +1342,27 @@ const DCRequest = () => {
             <FormControl
               fullWidth
               size="small"
-              sx={{ mt: statusUpdateRecord ? 0 : 2.5 }}
+              sx={{ mt: statusUpdateRecord ? 0 : 2.5, ...lightStyles.input }}
             >
-              <InputLabel>New Status</InputLabel>
+              <InputLabel id="new-status-label">New Status</InputLabel>
               <Select
+                labelId="new-status-label"
                 value={newStatusValue}
                 onChange={(e) => setNewStatusValue(e.target.value)}
                 label="New Status"
                 sx={lightStyles.input}
+                renderValue={(selected) => (
+                  <SelectValueRow
+                    icon={statusIcon(selected, 18)}
+                    text={selected}
+                    placeholder="Select status…"
+                  />
+                )}
               >
                 {STATUS_OPTIONS.map((status) => (
                   <MenuItem key={status} value={status}>
                     <Stack direction="row" spacing={1} alignItems="center">
-                      {status === "Completed" && (
-                        <CheckCircleIcon sx={{ color: "#4caf50" }} />
-                      )}
-                      {status === "Rejected" && (
-                        <CancelIcon sx={{ color: "#f44336" }} />
-                      )}
-                      {status === "Cancelled" && (
-                        <CancelIcon sx={{ color: "#ff9800" }} />
-                      )}
-                      {status === "In Progress" && (
-                        <PendingIcon sx={{ color: "#2196f3" }} />
-                      )}
-                      {status === "Pending" && (
-                        <PendingIcon sx={{ color: "#ff9800" }} />
-                      )}
+                      {statusIcon(status, 18)}
                       <Typography>{status}</Typography>
                     </Stack>
                   </MenuItem>
@@ -1291,7 +1391,7 @@ const DCRequest = () => {
                 bgcolor: "#FFD600",
                 color: "#000000",
                 fontWeight: "bold",
-                "&:hover": { bgcolor: "#ffcc00" }
+                "&:hover": { bgcolor: "#ffcc00" },
               }}
             >
               {loading ? (
@@ -1313,7 +1413,13 @@ const DCRequest = () => {
           PaperProps={{ sx: { borderRadius: "12px" } }}
         >
           <DialogTitle
-            sx={{ display: "flex", alignItems: "center", gap: 2, px: 3, py: 2.5 }}
+            sx={{
+              display: "flex",
+              alignItems: "center",
+              gap: 2,
+              px: 3,
+              py: 2.5,
+            }}
           >
             <WarningIcon sx={{ color: "#f44336", fontSize: 32 }} />
             <Typography variant="h6">Confirm Delete</Typography>
@@ -1329,7 +1435,7 @@ const DCRequest = () => {
                   mb: 2.5,
                   p: 2,
                   bgcolor: "#fff8e1",
-                  borderRadius: 2
+                  borderRadius: 2,
                 }}
               >
                 <Typography
@@ -1396,7 +1502,7 @@ const DCRequest = () => {
             sx={{
               bgcolor: "#ffffff",
               color: "#000000",
-              border: "1px solid #FFD600"
+              border: "1px solid #FFD600",
             }}
           >
             {snackbar.message}
