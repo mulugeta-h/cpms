@@ -31,7 +31,7 @@ export function parseCoordinate(input) {
     if (isValidLatLng(lat, lng)) return { lat, lng };
   }
 
-  // Try plain "lat,lng" or "lat lng"
+  // Try plain "lat,lng" or "lat lng" format
   const numMatch = str.match(
     /(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)/
   );
