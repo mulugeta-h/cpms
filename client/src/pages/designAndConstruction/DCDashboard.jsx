@@ -46,7 +46,7 @@ const STATUS_COLORS = {
   Rejected: "#ff4d4f",
 };
 
-/* ---------- Card ---------- */
+/* ---------- Card design---------- */
 const StatCard = ({ title, value, icon, color, subtitle }) => (
   <Card sx={{ bgcolor: "#fff", borderRadius: 2, boxShadow: 1, height: "100%" }}>
     <CardContent>
