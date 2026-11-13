@@ -6,151 +6,225 @@ import {
   Typography,
   Paper,
   Grid,
-  Card,
-  CardContent,
   useMediaQuery,
   useTheme,
   CircularProgress,
   Stack,
   Avatar,
+  Chip,
+  Alert,
+  Button,
+  Divider,
   Table,
   TableBody,
   TableCell,
   TableContainer,
   TableHead,
   TableRow,
-  Chip,
-  alpha,
-  Alert,
-  Button,
+  Tooltip,
 } from "@mui/material";
 import {
-  People as PeopleIcon,
-  AdminPanelSettings as AdminPanelSettingsIcon,
-  Security as SecurityIcon,
-  Person as PersonIcon,
-  EmojiEvents as EmojiEventsIcon,
-  CheckCircle as CheckCircleIcon,
   Refresh as RefreshIcon,
-  Dashboard as DashboardIcon,
-  VerifiedUser as VerifiedUserIcon,
+  Circle as CircleIcon,
+  Devices as DevicesIcon,
+  History as HistoryIcon,
 } from "@mui/icons-material";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 
 const API_URL = `${import.meta.env.VITE_API_URL}/api/super-admin/dashboard`;
 
-// Stat Card Component
-const StatCard = ({ title, value, icon, color, subtitle }) => (
-  <Card sx={{ bgcolor: "#fff", borderRadius: 2, boxShadow: 1, height: "100%" }}>
-    <CardContent>
-      <Stack direction="row" justifyContent="space-between" alignItems="center">
-        <Box>
-          <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-            {title}
-          </Typography>
-          <Typography variant="h4" fontWeight="bold" color={color}>
-            {value}
-          </Typography>
-          {subtitle && (
-            <Typography variant="caption" color="text.secondary">
-              {subtitle}
-            </Typography>
-          )}
-        </Box>
-        <Avatar
-          sx={{
-            bgcolor: `${color}15`,
-            width: 48,
-            height: 48,
-          }}
-        >
-          {icon}
-        </Avatar>
-      </Stack>
-    </CardContent>
-  </Card>
+// ─── Role metadata (labels only, no colors/icons) ─────────────────────
+const ROLE_META = {
+  superAdmins: { label: "Super Admins", enum: "SUPER_ADMIN" },
+  allAdmins:   { label: "All Admins",   enum: "ALL_ADMIN" },
+  allViews:    { label: "All Views",    enum: "ALL_VIEW" },
+  estAdmins:   { label: "Est Admins",   enum: "EST_ADMIN" },
+  dcAdmins:    { label: "DC Admins",    enum: "DC_ADMIN" },
+  users:       { label: "Users",        enum: "USER" },
+};
+
+const ENUM_TO_KEY = Object.fromEntries(
+  Object.entries(ROLE_META).map(([key, meta]) => [meta.enum, key])
 );
 
+// ─── Status chip (user active/inactive) ───────────────────────────────
+const StatusChip = ({ value, variant = "filled" }) => {
+  const isActive = value === "active";
+  return (
+    <Chip
+      label={isActive ? "Active" : "Inactive"}
+      size="small"
+      color={isActive ? "success" : "error"}
+      variant={variant}
+      sx={{ fontWeight: 600, minWidth: 70 }}
+    />
+  );
+};
+
+// ─── Session status chip (active / logged out / idle timeout / …) ─────
+const SESSION_STATUS_META = {
+  active:     { label: "Active",        color: "success" },
+  manual:     { label: "Logged out",    color: "default" },
+  inactivity: { label: "Idle timeout",  color: "warning" },
+  security:   { label: "Security",      color: "warning" },
+  admin:      { label: "Admin kill",    color: "warning" },
+  stale:      { label: "Stale",         color: "warning" },
+  ended:      { label: "Ended",         color: "default" },
+};
+
+const SessionStatusChip = ({ status }) => {
+  const meta = SESSION_STATUS_META[status] || SESSION_STATUS_META.ended;
+  const filled = status === "active";
+  return (
+    <Chip
+      label={meta.label}
+      size="small"
+      color={meta.color}
+      variant={filled ? "filled" : "outlined"}
+      sx={{ fontWeight: 600, minWidth: 100 }}
+    />
+  );
+};
+
+// ─── One role's status card ───────────────────────────────────────────
+const StatusCard = ({ title, data }) => {
+  const section = data || { total: 0, active: 0, inactive: 0 };
+  return (
+    <Paper sx={{ p: 2, borderRadius: 2, height: "100%" }}>
+      <Typography variant="h6" fontWeight="bold" sx={{ mb: 1.5, color: "#424242" }}>
+        {title} Status
+      </Typography>
+
+      <Stack spacing={1}>
+        {/* Total */}
+        <Box
+          sx={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            p: 1,
+            bgcolor: "#fafafa",
+            borderRadius: 1,
+            border: "1px solid #eee",
+          }}
+        >
+          <Typography variant="body2" fontWeight="bold" color="text.secondary">
+            Total
+          </Typography>
+          <Typography variant="body1" fontWeight="bold" color="#424242">
+            {section.total || 0}
+          </Typography>
+        </Box>
+
+        {/* Active */}
+        <Box
+          sx={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            p: 1,
+            bgcolor: "#f5f5f5",
+            borderRadius: 1,
+          }}
+        >
+          <Typography variant="body2">Active</Typography>
+          <Chip
+            label={section.active || 0}
+            size="small"
+            color="success"
+            sx={{ minWidth: 40, fontWeight: "bold" }}
+          />
+        </Box>
+
+        {/* Inactive */}
+        <Box
+          sx={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            p: 1,
+            bgcolor: "#f5f5f5",
+            borderRadius: 1,
+          }}
+        >
+          <Typography variant="body2">Inactive</Typography>
+          <Chip
+            label={section.inactive || 0}
+            size="small"
+            color="error"
+            sx={{ minWidth: 40, fontWeight: "bold" }}
+          />
+        </Box>
+      </Stack>
+    </Paper>
+  );
+};
+
+// ─── Main dashboard ───────────────────────────────────────────────────
 const SuperDashboard = () => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
   const navigate = useNavigate();
 
-  const getContainerMargin = () => isMobile ? "0px" : "4px";
-  const getContainerWidth = () => isMobile ? "100%" : "calc(100% - 6px)";
+  const getContainerMargin = () => (isMobile ? "0px" : "4px");
+  const getContainerWidth = () => (isMobile ? "100%" : "calc(100% - 6px)");
 
-  const fetchData = async () => {
+  const fetchData = async (silent = false) => {
+    if (silent) setRefreshing(true);
+    else setLoading(true);
+    setError(null);
+
     try {
-      setLoading(true);
-      setError(null);
-      
       const token = localStorage.getItem("token");
-      
       if (!token) {
         setError("No authentication token found. Please login again.");
-        setLoading(false);
         return;
       }
 
-      console.log("Fetching from URL:", API_URL);
-      
       const response = await axios.get(API_URL, {
-        headers: { 
+        headers: {
           Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
+          "Content-Type": "application/json",
+        },
       });
 
-      console.log("Response status:", response.status);
-      console.log("Response data:", response.data);
-      
-      if (response.data) {
-        setData(response.data);
-      } else {
-        setError("Failed to load dashboard data");
-      }
-      
-    } catch (error) {
-      console.error("Error fetching dashboard:", error);
-      
-      if (error.response) {
-        console.error("Response error:", error.response.data);
-        console.error("Status:", error.response.status);
-        
-        if (error.response.status === 401) {
+      if (response.data) setData(response.data);
+      else setError("Failed to load dashboard data");
+    } catch (err) {
+      console.error("Error fetching dashboard:", err);
+      if (err.response) {
+        if (err.response.status === 401) {
           setError("Session expired. Please login again.");
           localStorage.removeItem("token");
-          setTimeout(() => {
-            navigate("/login");
-          }, 2000);
+          setTimeout(() => navigate("/login"), 2000);
         } else {
-          setError(error.response.data?.message || "Failed to load dashboard data");
+          setError(err.response.data?.msg || "Failed to load dashboard data");
         }
-      } else if (error.request) {
+      } else if (err.request) {
         setError("Network error. Please check your connection.");
       } else {
-        setError(error.message || "An unexpected error occurred");
+        setError(err.message || "An unexpected error occurred");
       }
-      
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 60000);
+    const interval = setInterval(() => fetchData(true), 60000);
     return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleRetry = () => {
-    fetchData();
-  };
-
+  // ── Loading ──
   if (loading) {
     return (
       <Box sx={{ minHeight: "100vh", bgcolor: "#f5f5f5", py: 2 }}>
@@ -163,18 +237,17 @@ const SuperDashboard = () => {
     );
   }
 
+  // ── Error ──
   if (error) {
     return (
       <Box sx={{ minHeight: "100vh", bgcolor: "#f5f5f5", py: 2 }}>
         <Container maxWidth={false} sx={{ width: getContainerWidth(), ml: getContainerMargin() }}>
           <Paper sx={{ p: 4, textAlign: "center", borderRadius: 2 }}>
-            <Alert severity="error" sx={{ mb: 2 }}>
-              {error}
-            </Alert>
+            <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>
             <Button
               variant="contained"
               startIcon={<RefreshIcon />}
-              onClick={handleRetry}
+              onClick={() => fetchData()}
               sx={{ bgcolor: "#DAA520", "&:hover": { bgcolor: "#b8860b" } }}
             >
               Retry
@@ -185,6 +258,7 @@ const SuperDashboard = () => {
     );
   }
 
+  // ── No data ──
   if (!data) {
     return (
       <Box sx={{ minHeight: "100vh", bgcolor: "#f5f5f5", py: 2 }}>
@@ -194,7 +268,7 @@ const SuperDashboard = () => {
             <Button
               variant="contained"
               startIcon={<RefreshIcon />}
-              onClick={handleRetry}
+              onClick={() => fetchData()}
               sx={{ mt: 2, bgcolor: "#DAA520", "&:hover": { bgcolor: "#b8860b" } }}
             >
               Refresh
@@ -205,13 +279,7 @@ const SuperDashboard = () => {
     );
   }
 
-  // Extract data from response
-  const { users, admins, superAdmins, totalRecords, summary } = data;
-
-  // Get user info from localStorage
-  const userInfo = JSON.parse(localStorage.getItem("user") || "{}");
-  const adminName = userInfo?.name || "Super Admin";
-  const adminUsername = userInfo?.username || "superadmin";
+  const { activeSessions, recentSessions } = data;
 
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "#f5f5f5", py: isMobile ? 1 : 2 }}>
@@ -224,195 +292,346 @@ const SuperDashboard = () => {
           px: { xs: 1, sm: 2, md: 0.5 },
         }}
       >
-        {/* Header */}
-        <Typography variant={isMobile ? "h5" : "h4"} fontWeight="bold" color="#DAA520" gutterBottom>
-          Super Admin Dashboard
-        </Typography>
+        {/* ─── Header ─── */}
+        <Box
+          sx={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            mb: 2,
+            flexWrap: "wrap",
+            gap: 1,
+          }}
+        >
+          <Typography variant={isMobile ? "h5" : "h4"} fontWeight="bold" color="#DAA520">
+            Super Admin Dashboard
+          </Typography>
+          <Tooltip title="Refresh now">
+            <span>
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={
+                  refreshing ? (
+                    <CircularProgress size={14} sx={{ color: "#DAA520" }} />
+                  ) : (
+                    <RefreshIcon />
+                  )
+                }
+                onClick={() => fetchData(true)}
+                disabled={refreshing}
+                sx={{ borderColor: "#DAA520", color: "#DAA520" }}
+              >
+                Refresh
+              </Button>
+            </span>
+          </Tooltip>
+        </Box>
 
-        {/* Welcome */}
-        <Paper sx={{ p: 3, mb: 3, borderRadius: 2, background: "linear-gradient(135deg, #DAA520, #b8860b)", color: "white" }}>
-          <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems="center" spacing={2}>
-            <Stack direction="row" alignItems="center" spacing={2}>
-              <Avatar sx={{ width: 56, height: 56, bgcolor: "rgba(255,255,255,0.2)" }}>
-                <SecurityIcon sx={{ fontSize: 32 }} />
-              </Avatar>
-              <Box>
-                <Typography variant="h6" fontWeight="bold">Welcome, {adminName}!</Typography>
-                <Typography variant="body2" sx={{ opacity: 0.85 }}>
-                  {adminUsername} • SUPER_ADMIN
-                </Typography>
-              </Box>
-            </Stack>
-            <Stack direction="row" spacing={1}>
-              <Chip
-                icon={<DashboardIcon />}
-                label={`Total Records: ${totalRecords || 0}`}
-                sx={{ bgcolor: "rgba(255,255,255,0.2)", color: "white", "& .MuiChip-icon": { color: "white" } }}
-              />
-              <Chip
-                icon={<CheckCircleIcon />}
-                label="Active"
-                sx={{ bgcolor: "rgba(255,255,255,0.2)", color: "white", "& .MuiChip-icon": { color: "white" } }}
-              />
-            </Stack>
-          </Stack>
-        </Paper>
-
-        {/* Stats Cards */}
+        {/* ══════════ Role Status Cards ══════════ */}
         <Grid container spacing={2}>
-          <Grid item xs={12} sm={6} md={3}>
-            <StatCard
-              title="Total Users"
-              value={users?.total || 0}
-              icon={<PeopleIcon sx={{ color: "#1890ff" }} />}
-              color="#1890ff"
-              subtitle={`Active: ${users?.status?.active || 0} | Inactive: ${users?.status?.inactive || 0}`}
-            />
-          </Grid>
-          <Grid item xs={12} sm={6} md={3}>
-            <StatCard
-              title="Total Admins"
-              value={admins?.total || 0}
-              icon={<AdminPanelSettingsIcon sx={{ color: "#DAA520" }} />}
-              color="#DAA520"
-              subtitle={`Active: ${admins?.status?.active || 0} | Inactive: ${admins?.status?.inactive || 0}`}
-            />
-          </Grid>
-          <Grid item xs={12} sm={6} md={3}>
-            <StatCard
-              title="Super Admins"
-              value={superAdmins?.total || 0}
-              icon={<SecurityIcon sx={{ color: "#f44336" }} />}
-              color="#f44336"
-              subtitle={`Active: ${superAdmins?.status?.active || 0} | Inactive: ${superAdmins?.status?.inactive || 0}`}
-            />
-          </Grid>
-          <Grid item xs={12} sm={6} md={3}>
-            <StatCard
-              title="Total Records"
-              value={totalRecords || 0}
-              icon={<PersonIcon sx={{ color: "#722ed1" }} />}
-              color="#722ed1"
-              subtitle={`Total: ${summary?.totalAllUsers || 0}`}
-            />
-          </Grid>
+          {Object.entries(ROLE_META).map(([key, meta]) => (
+            <Grid item xs={12} sm={6} md={4} key={key}>
+              <StatusCard title={meta.label} data={data[key]} />
+            </Grid>
+          ))}
         </Grid>
 
-        {/* Summary Cards */}
-        <Grid container spacing={2} sx={{ mt: 1 }}>
-          <Grid item xs={12} sm={6} md={4}>
-            <Paper sx={{ p: 2, borderRadius: 2, textAlign: "center" }}>
-              <Typography variant="caption" color="text.secondary">Total Active Users</Typography>
-              <Typography variant="h4" fontWeight="bold" color="#52c41a">
-                {summary?.totalActive || 0}
+        {/* ══════════ Active Sessions ══════════ */}
+        <Paper sx={{ p: 2, mt: 3, borderRadius: 2 }}>
+          <Box
+            sx={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              mb: 1,
+              flexWrap: "wrap",
+              gap: 1,
+            }}
+          >
+            <Stack direction="row" alignItems="center" spacing={1}>
+              <CircleIcon sx={{ color: "#52c41a", fontSize: 14 }} />
+              <Typography variant="h6" fontWeight="bold" color="#424242">
+                Active Sessions
               </Typography>
-            </Paper>
-          </Grid>
-          <Grid item xs={12} sm={6} md={4}>
-            <Paper sx={{ p: 2, borderRadius: 2, textAlign: "center" }}>
-              <Typography variant="caption" color="text.secondary">Total Inactive Users</Typography>
-              <Typography variant="h4" fontWeight="bold" color="#ff4d4f">
-                {summary?.totalInactive || 0}
-              </Typography>
-            </Paper>
-          </Grid>
-          <Grid item xs={12} sm={6} md={4}>
-            <Paper sx={{ p: 2, borderRadius: 2, textAlign: "center" }}>
-              <Typography variant="caption" color="text.secondary">Users + Admins</Typography>
-              <Typography variant="h4" fontWeight="bold" color="#DAA520">
-                {summary?.totalUsersAndAdmins || 0}
-              </Typography>
-            </Paper>
-          </Grid>
-        </Grid>
+              <Chip
+                label={`${activeSessions?.total || 0} online`}
+                size="small"
+                color="success"
+                sx={{ fontWeight: "bold" }}
+              />
+            </Stack>
+            <Typography variant="caption" color="text.secondary">
+              Only enabled users with a live session are counted
+            </Typography>
+          </Box>
 
-        {/* Status Distribution Tables */}
-        <Grid container spacing={2} sx={{ mt: 1 }}>
-          <Grid item xs={12} md={4}>
-            <Paper sx={{ p: 2, borderRadius: 2 }}>
-              <Typography variant="h6" fontWeight="bold" sx={{ mb: 2, color: "#1890ff" }}>
-                Users Status
-              </Typography>
-              <Stack spacing={1}>
-                <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", p: 1, bgcolor: "#f5f5f5", borderRadius: 1 }}>
-                  <Typography variant="body2">Active</Typography>
-                  <Chip label={users?.status?.active || 0} size="small" sx={{ bgcolor: "#52c41a", color: "white" }} />
-                </Box>
-                <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", p: 1, bgcolor: "#f5f5f5", borderRadius: 1 }}>
-                  <Typography variant="body2">Inactive</Typography>
-                  <Chip label={users?.status?.inactive || 0} size="small" sx={{ bgcolor: "#ff4d4f", color: "white" }} />
-                </Box>
-              </Stack>
-            </Paper>
-          </Grid>
+          <Divider sx={{ mb: 2 }} />
 
-          <Grid item xs={12} md={4}>
-            <Paper sx={{ p: 2, borderRadius: 2 }}>
-              <Typography variant="h6" fontWeight="bold" sx={{ mb: 2, color: "#DAA520" }}>
-                Admins Status
-              </Typography>
-              <Stack spacing={1}>
-                <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", p: 1, bgcolor: "#f5f5f5", borderRadius: 1 }}>
-                  <Typography variant="body2">Active</Typography>
-                  <Chip label={admins?.status?.active || 0} size="small" sx={{ bgcolor: "#52c41a", color: "white" }} />
-                </Box>
-                <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", p: 1, bgcolor: "#f5f5f5", borderRadius: 1 }}>
-                  <Typography variant="body2">Inactive</Typography>
-                  <Chip label={admins?.status?.inactive || 0} size="small" sx={{ bgcolor: "#ff4d4f", color: "white" }} />
-                </Box>
-              </Stack>
-            </Paper>
+          {/* Per-role active counts */}
+          <Grid container spacing={1} sx={{ mb: 2 }}>
+            {Object.entries(ROLE_META).map(([key, meta]) => {
+              const count = activeSessions?.byRole?.[meta.enum] || 0;
+              return (
+                <Grid item xs={6} sm={4} md={2} key={key}>
+                  <Box
+                    sx={{
+                      p: 1.5,
+                      borderRadius: 1,
+                      bgcolor: "#fafafa",
+                      border: "1px solid #eee",
+                      textAlign: "center",
+                    }}
+                  >
+                    <Typography variant="caption" color="text.secondary">
+                      {meta.label}
+                    </Typography>
+                    <Typography variant="h6" fontWeight="bold" color="#424242">
+                      {count}
+                    </Typography>
+                  </Box>
+                </Grid>
+              );
+            })}
           </Grid>
 
-          <Grid item xs={12} md={4}>
-            <Paper sx={{ p: 2, borderRadius: 2 }}>
-              <Typography variant="h6" fontWeight="bold" sx={{ mb: 2, color: "#f44336" }}>
-                Super Admins Status
-              </Typography>
-              <Stack spacing={1}>
-                <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", p: 1, bgcolor: "#f5f5f5", borderRadius: 1 }}>
-                  <Typography variant="body2">Active</Typography>
-                  <Chip label={superAdmins?.status?.active || 0} size="small" sx={{ bgcolor: "#52c41a", color: "white" }} />
-                </Box>
-                <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", p: 1, bgcolor: "#f5f5f5", borderRadius: 1 }}>
-                  <Typography variant="body2">Inactive</Typography>
-                  <Chip label={superAdmins?.status?.inactive || 0} size="small" sx={{ bgcolor: "#ff4d4f", color: "white" }} />
-                </Box>
-              </Stack>
-            </Paper>
-          </Grid>
-        </Grid>
+          {activeSessions?.list?.length > 0 ? (
+            <TableContainer sx={{ maxHeight: 420 }}>
+              <Table stickyHeader size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell sx={{ fontWeight: "bold", bgcolor: "#fafafa" }}>Username</TableCell>
+                    <TableCell sx={{ fontWeight: "bold", bgcolor: "#fafafa" }}>Name</TableCell>
+                    <TableCell sx={{ fontWeight: "bold", bgcolor: "#fafafa" }}>Role</TableCell>
+                    <TableCell sx={{ fontWeight: "bold", bgcolor: "#fafafa" }}>Device</TableCell>
+                    <TableCell sx={{ fontWeight: "bold", bgcolor: "#fafafa" }}>IP</TableCell>
+                    <TableCell sx={{ fontWeight: "bold", bgcolor: "#fafafa" }}>Last Login</TableCell>
+                    <TableCell sx={{ fontWeight: "bold", bgcolor: "#fafafa" }}>Last Activity</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {activeSessions.list.map((s) => {
+                    const roleKey = ENUM_TO_KEY[s.role];
+                    const label = ROLE_META[roleKey]?.label || s.role || "USER";
 
-        {/* Summary Footer */}
-        <Paper sx={{ p: 2, mt: 2, borderRadius: 2, bgcolor: "#fafafa" }}>
-          <Grid container spacing={2}>
-            <Grid item xs={6} md={3}>
-              <Box textAlign="center">
-                <Typography variant="caption" color="text.secondary">Total Users</Typography>
-                <Typography variant="h6" fontWeight="bold" color="#1890ff">{users?.total || 0}</Typography>
-              </Box>
-            </Grid>
-            <Grid item xs={6} md={3}>
-              <Box textAlign="center">
-                <Typography variant="caption" color="text.secondary">Total Admins</Typography>
-                <Typography variant="h6" fontWeight="bold" color="#DAA520">{admins?.total || 0}</Typography>
-              </Box>
-            </Grid>
-            <Grid item xs={6} md={3}>
-              <Box textAlign="center">
-                <Typography variant="caption" color="text.secondary">Super Admins</Typography>
-                <Typography variant="h6" fontWeight="bold" color="#f44336">{superAdmins?.total || 0}</Typography>
-              </Box>
-            </Grid>
-            <Grid item xs={6} md={3}>
-              <Box textAlign="center">
-                <Typography variant="caption" color="text.secondary">Grand Total</Typography>
-                <Typography variant="h6" fontWeight="bold" color="#722ed1">{totalRecords || 0}</Typography>
-              </Box>
-            </Grid>
-          </Grid>
+                    return (
+                      <TableRow key={s.sessionId} hover>
+                        <TableCell>
+                          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                            <Avatar
+                              sx={{ width: 26, height: 26, bgcolor: "#9e9e9e", fontSize: 13 }}
+                            >
+                              {s.username?.charAt(0).toUpperCase()}
+                            </Avatar>
+                            <Typography variant="body2" fontWeight="medium">
+                              {s.username}
+                            </Typography>
+                          </Box>
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="body2">{s.name}</Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Chip
+                            label={label}
+                            size="small"
+                            variant="outlined"
+                            sx={{
+                              borderColor: "#bdbdbd",
+                              color: "#424242",
+                              fontWeight: s.role === "SUPER_ADMIN" ? "bold" : "normal",
+                            }}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Stack direction="row" alignItems="center" spacing={0.5}>
+                            <DevicesIcon sx={{ fontSize: 14, color: "#888" }} />
+                            <Typography variant="caption" sx={{ fontFamily: "monospace" }}>
+                              {s.deviceId ? s.deviceId.slice(0, 10) : "—"}
+                            </Typography>
+                          </Stack>
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="caption" sx={{ fontFamily: "monospace" }}>
+                            {s.ipAddress || "—"}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="caption">
+                            {s.lastIn ? new Date(s.lastIn).toLocaleString() : "—"}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="caption">
+                            {s.lastActivity ? new Date(s.lastActivity).toLocaleString() : "—"}
+                          </Typography>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          ) : (
+            <Box sx={{ textAlign: "center", py: 5 }}>
+              <CircleIcon sx={{ color: "#ccc", fontSize: 40, mb: 1 }} />
+              <Typography variant="body2" color="text.secondary">
+                No users are currently logged in.
+              </Typography>
+            </Box>
+          )}
         </Paper>
 
+        {/* ══════════ Recent Sessions (last 100) ══════════ */}
+        <Paper sx={{ p: 2, mt: 3, borderRadius: 2 }}>
+          <Box
+            sx={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              mb: 1,
+              flexWrap: "wrap",
+              gap: 1,
+            }}
+          >
+            <Stack direction="row" alignItems="center" spacing={1}>
+              <HistoryIcon sx={{ color: "#DAA520", fontSize: 20 }} />
+              <Typography variant="h6" fontWeight="bold" color="#424242">
+                Recent Sessions
+              </Typography>
+              <Chip
+                label={`${recentSessions?.total || 0} of last ${recentSessions?.limit || 100}`}
+                size="small"
+                sx={{ fontWeight: "bold" }}
+              />
+              {recentSessions?.byStatus &&
+                Object.entries(recentSessions.byStatus).map(([status, count]) => {
+                  const meta = SESSION_STATUS_META[status] || SESSION_STATUS_META.ended;
+                  return (
+                    <Chip
+                      key={status}
+                      label={`${meta.label}: ${count}`}
+                      size="small"
+                      variant="outlined"
+                      color={meta.color}
+                      sx={{ fontWeight: 500 }}
+                    />
+                  );
+                })}
+            </Stack>
+            <Typography variant="caption" color="text.secondary">
+              Newest activity first — includes active and ended sessions
+            </Typography>
+          </Box>
+
+          <Divider sx={{ mb: 2 }} />
+
+          {recentSessions?.list?.length > 0 ? (
+            <TableContainer sx={{ maxHeight: 480 }}>
+              <Table stickyHeader size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell sx={{ fontWeight: "bold", bgcolor: "#fafafa" }}>Username</TableCell>
+                    <TableCell sx={{ fontWeight: "bold", bgcolor: "#fafafa" }}>Name</TableCell>
+                    <TableCell sx={{ fontWeight: "bold", bgcolor: "#fafafa" }}>Role</TableCell>
+                    <TableCell sx={{ fontWeight: "bold", bgcolor: "#fafafa" }}>Status</TableCell>
+                    <TableCell sx={{ fontWeight: "bold", bgcolor: "#fafafa" }}>Device</TableCell>
+                    <TableCell sx={{ fontWeight: "bold", bgcolor: "#fafafa" }}>IP</TableCell>
+                    <TableCell sx={{ fontWeight: "bold", bgcolor: "#fafafa" }}>Last Login</TableCell>
+                    <TableCell sx={{ fontWeight: "bold", bgcolor: "#fafafa" }}>Last Activity</TableCell>
+                    <TableCell sx={{ fontWeight: "bold", bgcolor: "#fafafa" }}>Ended At</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {recentSessions.list.map((s) => {
+                    const roleKey = ENUM_TO_KEY[s.role];
+                    const roleLabel = ROLE_META[roleKey]?.label || s.role || "USER";
+                    const userDisabled = s.userEnabled === false;
+
+                    return (
+                      <TableRow key={s.sessionId} hover>
+                        <TableCell>
+                          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                            <Avatar
+                              sx={{ width: 26, height: 26, bgcolor: "#9e9e9e", fontSize: 13 }}
+                            >
+                              {s.username?.charAt(0)?.toUpperCase() || "?"}
+                            </Avatar>
+                            <Typography variant="body2" fontWeight="medium">
+                              {s.username}
+                              {userDisabled && (
+                                <Typography
+                                  component="span"
+                                  variant="caption"
+                                  sx={{ ml: 0.5, color: "error.main" }}
+                                >
+                                  (disabled)
+                                </Typography>
+                              )}
+                            </Typography>
+                          </Box>
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="body2">{s.name}</Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Chip
+                            label={roleLabel}
+                            size="small"
+                            variant="outlined"
+                            sx={{
+                              borderColor: "#bdbdbd",
+                              color: "#424242",
+                              fontWeight: s.role === "SUPER_ADMIN" ? "bold" : "normal",
+                            }}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <SessionStatusChip status={s.status} />
+                        </TableCell>
+                        <TableCell>
+                          <Stack direction="row" alignItems="center" spacing={0.5}>
+                            <DevicesIcon sx={{ fontSize: 14, color: "#888" }} />
+                            <Typography variant="caption" sx={{ fontFamily: "monospace" }}>
+                              {s.deviceId ? s.deviceId.slice(0, 10) : "—"}
+                            </Typography>
+                          </Stack>
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="caption" sx={{ fontFamily: "monospace" }}>
+                            {s.ipAddress || "—"}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="caption">
+                            {s.lastIn ? new Date(s.lastIn).toLocaleString() : "—"}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="caption">
+                            {s.lastActivity ? new Date(s.lastActivity).toLocaleString() : "—"}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="caption">
+                            {s.expiredAt ? new Date(s.expiredAt).toLocaleString() : "—"}
+                          </Typography>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          ) : (
+            <Box sx={{ textAlign: "center", py: 5 }}>
+              <HistoryIcon sx={{ color: "#ccc", fontSize: 40, mb: 1 }} />
+              <Typography variant="body2" color="text.secondary">
+                No sessions recorded yet.
+              </Typography>
+            </Box>
+          )}
+        </Paper>
       </Container>
     </Box>
   );

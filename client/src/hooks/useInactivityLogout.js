@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from "react";
 
-export const INACTIVITY_MS = 15 * 60 * 1000;
+export const INACTIVITY_MS = 1 * 60 * 1000;
 
 const ACTIVITY_EVENTS = [
   "mousedown",

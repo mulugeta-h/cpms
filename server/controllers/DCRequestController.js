@@ -1,5 +1,8 @@
 // controllers/DCRequestController.js
 const { DCRequest, getNextDC } = require("../models/DCRequest");
+const Design = require("../models/Design");
+const Specification = require("../models/Specification");
+const Construction = require("../models/Construction");
 const User = require("../models/User");
 const mongoose = require("mongoose");
 
@@ -300,30 +303,55 @@ const deleteDCRequest = async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid DC request ID"
+        message: "Invalid DC request ID",
       });
     }
 
-    const dcRequest = await DCRequest.findByIdAndDelete(id);
+    // 1. Find first so we can grab DCId for cascade
+    const dcRequest = await DCRequest.findById(id);
 
     if (!dcRequest) {
       return res.status(404).json({
         success: false,
-        message: "DC request not found"
+        message: "DC request not found",
       });
     }
 
-    res.status(200).json({
+    const dcId = dcRequest.DCId;
+
+    // 2. Delete the DC request
+    await DCRequest.findByIdAndDelete(id);
+
+    // 3. Cascade delete related records by DCId
+    //    Only run if DCId exists (avoid wiping records with undefined/null DCId)
+    let deletedRelated = { design: 0, specification: 0, construction: 0 };
+
+    if (dcId) {
+      const [designRes, specRes, constrRes] = await Promise.all([
+        Design.deleteMany({ DCId: dcId }),
+        Specification.deleteMany({ DCId: dcId }),
+        Construction.deleteMany({ DCId: dcId }),
+      ]);
+
+      deletedRelated = {
+        design: designRes.deletedCount || 0,
+        specification: specRes.deletedCount || 0,
+        construction: constrRes.deletedCount || 0,
+      };
+    }
+
+    return res.status(200).json({
       success: true,
-      message: "DC request deleted successfully",
-      data: dcRequest
+      message: "DC request and related records deleted successfully",
+      data: dcRequest,
+      deletedRelated,
     });
   } catch (error) {
     console.error("Error deleting DC request:", error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: "Failed to delete DC request",
-      error: error.message
+      error: error.message,
     });
   }
 };

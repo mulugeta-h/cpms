@@ -1,4 +1,4 @@
-// pages/superAdmin/SuperDashboard.jsx
+// pages/admin/AdminDashboard.jsx
 import React, { useState, useEffect } from "react";
 import {
   Box,
@@ -16,22 +16,37 @@ import {
   Chip,
   Alert,
   Button,
+  Divider,
+  LinearProgress,
 } from "@mui/material";
 import {
-  People as PeopleIcon,
-  AdminPanelSettings as AdminPanelSettingsIcon,
-  Security as SecurityIcon,
-  Person as PersonIcon,
+  Assignment as AssignmentIcon,
+  Description as DescriptionIcon,
   CheckCircle as CheckCircleIcon,
   Refresh as RefreshIcon,
   Dashboard as DashboardIcon,
+  TrendingUp as TrendingUpIcon,
+  People as PeopleIcon,
+  Engineering as EngineeringIcon,
+  Draw as DrawIcon,
+  Build as BuildIcon,
+  Security as SecurityIcon,
+  AdminPanelSettings as AdminPanelSettingsIcon,
+  Person as PersonIcon,
+  FiberManualRecord as DotIcon,
 } from "@mui/icons-material";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 
-const API_URL = `${import.meta.env.VITE_API_URL}/api/super-admin/dashboard`;
+const API_BASE = `${import.meta.env.VITE_API_URL}/api/dashboard`;
 
-// Stat Card Component
+const STATUS_COLORS = {
+  "In Progress": "#DAA520",
+  Completed: "#52c41a",
+  Rejected: "#ff4d4f",
+};
+
+/* ---------- Card ---------- */
 const StatCard = ({ title, value, icon, color, subtitle }) => (
   <Card sx={{ bgcolor: "#fff", borderRadius: 2, boxShadow: 1, height: "100%" }}>
     <CardContent>
@@ -41,7 +56,7 @@ const StatCard = ({ title, value, icon, color, subtitle }) => (
             {title}
           </Typography>
           <Typography variant="h4" fontWeight="bold" color={color}>
-            {value}
+            {value ?? 0}
           </Typography>
           {subtitle && (
             <Typography variant="caption" color="text.secondary">
@@ -49,13 +64,7 @@ const StatCard = ({ title, value, icon, color, subtitle }) => (
             </Typography>
           )}
         </Box>
-        <Avatar
-          sx={{
-            bgcolor: `${color}15`,
-            width: 48,
-            height: 48,
-          }}
-        >
+        <Avatar sx={{ bgcolor: `${color}15`, width: 48, height: 48 }}>
           {icon}
         </Avatar>
       </Stack>
@@ -63,70 +72,176 @@ const StatCard = ({ title, value, icon, color, subtitle }) => (
   </Card>
 );
 
-const SuperDashboard = () => {
-  const [data, setData] = useState(null);
+/* ---------- Number row ---------- */
+const NumRow = ({ label, value, color = "text.primary", bold = false }) => (
+  <Stack
+    direction="row"
+    justifyContent="space-between"
+    alignItems="center"
+    sx={{ py: 0.75 }}
+  >
+    <Typography variant="body2" color="text.secondary">
+      {label}
+    </Typography>
+    <Typography
+      variant="body2"
+      fontWeight={bold ? "bold" : "normal"}
+      color={color}
+    >
+      {value ?? 0}
+    </Typography>
+  </Stack>
+);
+
+/* ---------- Status block ---------- */
+const StatusBlock = ({ title, data, color }) => {
+  const total = data?.total || 0;
+  return (
+    <Paper sx={{ p: 2, borderRadius: 2, height: "100%" }}>
+      <Stack direction="row" justifyContent="space-between" mb={1}>
+        <Typography variant="subtitle2" fontWeight="bold" color={color}>
+          {title}
+        </Typography>
+        <Chip
+          label={`Total: ${total}`}
+          size="small"
+          sx={{ bgcolor: `${color}20`, color, fontWeight: 600 }}
+        />
+      </Stack>
+      <Divider sx={{ mb: 1 }} />
+      <NumRow label="In Progress" value={data?.["In Progress"]} color="#b8860b" />
+      <NumRow label="Completed" value={data?.Completed} color="#389e0d" />
+      <NumRow label="Rejected" value={data?.Rejected} color="#cf1322" />
+      {data?.today !== undefined && (
+        <NumRow label="Today" value={data.today} bold />
+      )}
+      {data?.thisWeek !== undefined && (
+        <NumRow label="This week" value={data.thisWeek} />
+      )}
+      {data?.assigned !== undefined && (
+        <NumRow label="Assigned" value={data.assigned} />
+      )}
+
+      {total > 0 && (
+        <Box sx={{ mt: 1.5 }}>
+          <LinearProgress
+            variant="determinate"
+            value={Math.round(((data.Completed || 0) / total) * 100)}
+            sx={{
+              height: 6,
+              borderRadius: 3,
+              bgcolor: "#f0f0f0",
+              "& .MuiLinearProgress-bar": { bgcolor: "#52c41a" },
+            }}
+          />
+        </Box>
+      )}
+    </Paper>
+  );
+};
+
+/* ---------- Construction field row ---------- */
+const ConstructionRow = ({ label, data }) => {
+  const c = data?.Completed || 0;
+  const p = data?.Pending || 0;
+  const n = data?.["Not Required"] || 0;
+  const total = c + p + n;
+  return (
+    <Box sx={{ py: 1, borderBottom: "1px solid #f0f0f0" }}>
+      <Stack direction="row" justifyContent="space-between" mb={0.5}>
+        <Typography variant="caption">{label}</Typography>
+        <Typography variant="caption" color="text.secondary">
+          {c}/{total}
+        </Typography>
+      </Stack>
+      <LinearProgress
+        variant="determinate"
+        value={total ? Math.round((c / total) * 100) : 0}
+        sx={{
+          height: 6,
+          borderRadius: 3,
+          bgcolor: "#f0f0f0",
+          "& .MuiLinearProgress-bar": { bgcolor: "#52c41a" },
+        }}
+      />
+      <Stack direction="row" spacing={2} mt={0.5}>
+        <Stack direction="row" alignItems="center" spacing={0.5}>
+          <DotIcon sx={{ fontSize: 10, color: "#52c41a" }} />
+          <Typography variant="caption" color="text.secondary">
+            {c} done
+          </Typography>
+        </Stack>
+        <Stack direction="row" alignItems="center" spacing={0.5}>
+          <DotIcon sx={{ fontSize: 10, color: "#DAA520" }} />
+          <Typography variant="caption" color="text.secondary">
+            {p} pending
+          </Typography>
+        </Stack>
+        <Stack direction="row" alignItems="center" spacing={0.5}>
+          <DotIcon sx={{ fontSize: 10, color: "#999" }} />
+          <Typography variant="caption" color="text.secondary">
+            {n} N/A
+          </Typography>
+        </Stack>
+      </Stack>
+    </Box>
+  );
+};
+
+/* ---------- Main ---------- */
+const AdminDashboard = () => {
+  const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [lastUpdated, setLastUpdated] = useState(null);
+
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
   const navigate = useNavigate();
 
-  const getContainerMargin = () => isMobile ? "0px" : "4px";
-  const getContainerWidth = () => isMobile ? "100%" : "calc(100% - 6px)";
+  const userInfo = (() => {
+    try {
+      return JSON.parse(localStorage.getItem("user") || "{}");
+    } catch {
+      return {};
+    }
+  })();
 
   const fetchData = async () => {
     try {
       setLoading(true);
       setError(null);
-      
+
       const token = localStorage.getItem("token");
-      
       if (!token) {
         setError("No authentication token found. Please login again.");
         setLoading(false);
         return;
       }
 
-      console.log("Fetching from URL:", API_URL);
-      
-      const response = await axios.get(API_URL, {
-        headers: { 
+      const cfg = {
+        headers: {
           Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
+          "Content-Type": "application/json",
+        },
+      };
 
-      console.log("Response status:", response.status);
-      console.log("Response data:", response.data);
-      
-      if (response.data) {
-        setData(response.data);
-      } else {
-        setError("Failed to load dashboard data");
-      }
-      
-    } catch (error) {
-      console.error("Error fetching dashboard:", error);
-      
-      if (error.response) {
-        console.error("Response error:", error.response.data);
-        console.error("Status:", error.response.status);
-        
-        if (error.response.status === 401) {
-          setError("Session expired. Please login again.");
-          localStorage.removeItem("token");
-          setTimeout(() => {
-            navigate("/login");
-          }, 2000);
-        } else {
-          setError(error.response.data?.message || "Failed to load dashboard data");
-        }
-      } else if (error.request) {
+      const s = await axios.get(`${API_BASE}/summary`, cfg);
+      setSummary(s.data?.data || null);
+      setLastUpdated(new Date());
+    } catch (err) {
+      console.error("Dashboard fetch error:", err);
+      if (err.response?.status === 401) {
+        setError("Session expired. Please login again.");
+        localStorage.removeItem("token");
+        setTimeout(() => navigate("/login"), 2000);
+      } else if (err.response) {
+        setError(err.response.data?.message || "Failed to load dashboard data");
+      } else if (err.request) {
         setError("Network error. Please check your connection.");
       } else {
-        setError(error.message || "An unexpected error occurred");
+        setError(err.message || "An unexpected error occurred");
       }
-      
     } finally {
       setLoading(false);
     }
@@ -136,17 +251,21 @@ const SuperDashboard = () => {
     fetchData();
     const interval = setInterval(fetchData, 60000);
     return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleRetry = () => {
-    fetchData();
-  };
-
-  if (loading) {
+  if (loading && !summary) {
     return (
       <Box sx={{ minHeight: "100vh", bgcolor: "#f5f5f5", py: 2 }}>
-        <Container maxWidth={false} sx={{ width: getContainerWidth(), ml: getContainerMargin() }}>
-          <Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "400px" }}>
+        <Container maxWidth={false}>
+          <Box
+            sx={{
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center",
+              minHeight: 400,
+            }}
+          >
             <CircularProgress sx={{ color: "#DAA520" }} />
           </Box>
         </Container>
@@ -154,10 +273,10 @@ const SuperDashboard = () => {
     );
   }
 
-  if (error) {
+  if (error && !summary) {
     return (
       <Box sx={{ minHeight: "100vh", bgcolor: "#f5f5f5", py: 2 }}>
-        <Container maxWidth={false} sx={{ width: getContainerWidth(), ml: getContainerMargin() }}>
+        <Container maxWidth={false}>
           <Paper sx={{ p: 4, textAlign: "center", borderRadius: 2 }}>
             <Alert severity="error" sx={{ mb: 2 }}>
               {error}
@@ -165,7 +284,7 @@ const SuperDashboard = () => {
             <Button
               variant="contained"
               startIcon={<RefreshIcon />}
-              onClick={handleRetry}
+              onClick={fetchData}
               sx={{ bgcolor: "#DAA520", "&:hover": { bgcolor: "#b8860b" } }}
             >
               Retry
@@ -176,237 +295,240 @@ const SuperDashboard = () => {
     );
   }
 
-  if (!data) {
-    return (
-      <Box sx={{ minHeight: "100vh", bgcolor: "#f5f5f5", py: 2 }}>
-        <Container maxWidth={false} sx={{ width: getContainerWidth(), ml: getContainerMargin() }}>
-          <Paper sx={{ p: 4, textAlign: "center", borderRadius: 2 }}>
-            <Typography color="text.secondary">No data available</Typography>
-            <Button
-              variant="contained"
-              startIcon={<RefreshIcon />}
-              onClick={handleRetry}
-              sx={{ mt: 2, bgcolor: "#DAA520", "&:hover": { bgcolor: "#b8860b" } }}
-            >
-              Refresh
-            </Button>
-          </Paper>
-        </Container>
-      </Box>
-    );
-  }
+  if (!summary) return null;
 
-  // Extract data from response
-  const { users, admins, superAdmins, totalRecords, summary } = data;
+  const dc = summary.dcRequests || {};
+  const est = summary.estimationRequests || {};
+  const users = summary.users || {};
+  const roles = users.roles || {};
+  const construction = summary.construction || { total: 0, fields: {} };
+  const design = summary.design || {};
+  const specification = summary.specification || {};
+  const sessions = summary.sessions || {};
 
-  // Get user info from localStorage
-  const userInfo = JSON.parse(localStorage.getItem("user") || "{}");
-  const adminName = userInfo?.name || "Super Admin";
-  const adminUsername = userInfo?.username || "superadmin";
+  const userName = userInfo?.name || "User";
+  const username = userInfo?.username || "user";
+  const roleLabel = userInfo?.role || "USER";
 
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "#f5f5f5", py: isMobile ? 1 : 2 }}>
-      <Container
-        maxWidth={false}
-        sx={{
-          width: getContainerWidth(),
-          ml: getContainerMargin(),
-          mr: isMobile ? 0 : "12px",
-          px: { xs: 1, sm: 2, md: 0.5 },
-        }}
-      >
-        {/* Header */}
-        <Typography variant={isMobile ? "h5" : "h4"} fontWeight="bold" color="#DAA520" gutterBottom>
-          Super Admin Dashboard
+      <Container maxWidth={false} sx={{ px: { xs: 1, sm: 2 } }}>
+        <Typography
+          variant={isMobile ? "h5" : "h4"}
+          fontWeight="bold"
+          color="#DAA520"
+          gutterBottom
+        >
+          Dashboard
         </Typography>
 
-        {/* Welcome */}
-        <Paper sx={{ p: 3, mb: 3, borderRadius: 2, background: "linear-gradient(135deg, #DAA520, #b8860b)", color: "white" }}>
-          <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems="center" spacing={2}>
+        {/* Welcome banner */}
+        <Paper
+          sx={{
+            p: 3,
+            mb: 3,
+            borderRadius: 2,
+            background: "linear-gradient(135deg, #DAA520, #b8860b)",
+            color: "white",
+          }}
+        >
+          <Stack
+            direction={{ xs: "column", sm: "row" }}
+            justifyContent="space-between"
+            alignItems="center"
+            spacing={2}
+          >
             <Stack direction="row" alignItems="center" spacing={2}>
-              <Avatar sx={{ width: 56, height: 56, bgcolor: "rgba(255,255,255,0.2)" }}>
-                <SecurityIcon sx={{ fontSize: 32 }} />
+              <Avatar
+                sx={{ width: 56, height: 56, bgcolor: "rgba(255,255,255,0.2)" }}
+              >
+                <DashboardIcon sx={{ fontSize: 32 }} />
               </Avatar>
               <Box>
-                <Typography variant="h6" fontWeight="bold">Welcome, {adminName}!</Typography>
+                <Typography variant="h6" fontWeight="bold">
+                  Welcome, {userName}!
+                </Typography>
                 <Typography variant="body2" sx={{ opacity: 0.85 }}>
-                  {adminUsername} • SUPER_ADMIN
+                  {username} • {roleLabel}
                 </Typography>
               </Box>
             </Stack>
-            <Stack direction="row" spacing={1}>
-              <Chip
-                icon={<DashboardIcon />}
-                label={`Total Records: ${totalRecords || 0}`}
-                sx={{ bgcolor: "rgba(255,255,255,0.2)", color: "white", "& .MuiChip-icon": { color: "white" } }}
-              />
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
               <Chip
                 icon={<CheckCircleIcon />}
-                label="Active"
-                sx={{ bgcolor: "rgba(255,255,255,0.2)", color: "white", "& .MuiChip-icon": { color: "white" } }}
+                label={
+                  lastUpdated
+                    ? `Updated ${lastUpdated.toLocaleTimeString()}`
+                    : "Live"
+                }
+                sx={{
+                  bgcolor: "rgba(255,255,255,0.2)",
+                  color: "white",
+                  "& .MuiChip-icon": { color: "white" },
+                }}
               />
             </Stack>
           </Stack>
         </Paper>
 
-        {/* Stats Cards */}
+        {error && (
+          <Alert
+            severity="warning"
+            sx={{ mb: 2 }}
+            onClose={() => setError(null)}
+          >
+            {error}
+          </Alert>
+        )}
+
+        {/* KPI cards */}
         <Grid container spacing={2}>
           <Grid item xs={12} sm={6} md={3}>
             <StatCard
-              title="Total Users"
-              value={users?.total || 0}
-              icon={<PeopleIcon sx={{ color: "#1890ff" }} />}
+              title="DC Requests"
+              value={dc.total}
+              icon={<AssignmentIcon sx={{ color: "#1890ff" }} />}
               color="#1890ff"
-              subtitle={`Active: ${users?.status?.active || 0} | Inactive: ${users?.status?.inactive || 0}`}
+              subtitle={`In Progress: ${dc["In Progress"] || 0} | Done: ${
+                dc.Completed || 0
+              }`}
             />
           </Grid>
           <Grid item xs={12} sm={6} md={3}>
             <StatCard
-              title="Total Admins"
-              value={admins?.total || 0}
-              icon={<AdminPanelSettingsIcon sx={{ color: "#DAA520" }} />}
+              title="Estimation Requests"
+              value={est.total}
+              icon={<DescriptionIcon sx={{ color: "#DAA520" }} />}
               color="#DAA520"
-              subtitle={`Active: ${admins?.status?.active || 0} | Inactive: ${admins?.status?.inactive || 0}`}
+              subtitle={`In Progress: ${est["In Progress"] || 0} | Done: ${
+                est.Completed || 0
+              }`}
             />
           </Grid>
           <Grid item xs={12} sm={6} md={3}>
             <StatCard
-              title="Super Admins"
-              value={superAdmins?.total || 0}
-              icon={<SecurityIcon sx={{ color: "#f44336" }} />}
-              color="#f44336"
-              subtitle={`Active: ${superAdmins?.status?.active || 0} | Inactive: ${superAdmins?.status?.inactive || 0}`}
+              title="Construction Records"
+              value={construction.total}
+              icon={<BuildIcon sx={{ color: "#13c2c2" }} />}
+              color="#13c2c2"
             />
           </Grid>
           <Grid item xs={12} sm={6} md={3}>
             <StatCard
-              title="Total Records"
-              value={totalRecords || 0}
-              icon={<PersonIcon sx={{ color: "#722ed1" }} />}
+              title="Design / Spec"
+              value={(design.total || 0) + (specification.total || 0)}
+              icon={<DrawIcon sx={{ color: "#722ed1" }} />}
               color="#722ed1"
-              subtitle={`Total: ${summary?.totalAllUsers || 0}`}
+              subtitle={`Design: ${design.total || 0} | Spec: ${
+                specification.total || 0
+              }`}
             />
           </Grid>
         </Grid>
 
-        {/* Summary Cards */}
+        {/* Status blocks */}
         <Grid container spacing={2} sx={{ mt: 1 }}>
-          <Grid item xs={12} sm={6} md={4}>
-            <Paper sx={{ p: 2, borderRadius: 2, textAlign: "center" }}>
-              <Typography variant="caption" color="text.secondary">Total Active Users</Typography>
-              <Typography variant="h4" fontWeight="bold" color="#52c41a">
-                {summary?.totalActive || 0}
-              </Typography>
+          <Grid item xs={12} sm={6} md={3}>
+            <StatusBlock title="DC Status" data={dc} color="#1890ff" />
+          </Grid>
+          <Grid item xs={12} sm={6} md={3}>
+            <StatusBlock title="Estimation Status" data={est} color="#DAA520" />
+          </Grid>
+          <Grid item xs={12} sm={6} md={3}>
+            <Paper sx={{ p: 2, borderRadius: 2, height: "100%" }}>
+              <Stack direction="row" justifyContent="space-between" mb={1}>
+                <Typography
+                  variant="subtitle2"
+                  fontWeight="bold"
+                  color="#1890ff"
+                >
+                  Users
+                </Typography>
+                <Chip
+                  label={`Total: ${users.total || 0}`}
+                  size="small"
+                  sx={{
+                    bgcolor: "#1890ff20",
+                    color: "#1890ff",
+                    fontWeight: 600,
+                  }}
+                />
+              </Stack>
+              <Divider sx={{ mb: 1 }} />
+              <NumRow label="Enabled" value={users.enabled} color="#389e0d" />
+              <NumRow label="Disabled" value={users.disabled} color="#cf1322" />
+              <NumRow label="SUPER_ADMIN" value={roles.SUPER_ADMIN} />
+              <NumRow label="ADMIN" value={roles.ADMIN} />
+              <NumRow label="USER" value={roles.USER} />
             </Paper>
           </Grid>
-          <Grid item xs={12} sm={6} md={4}>
-            <Paper sx={{ p: 2, borderRadius: 2, textAlign: "center" }}>
-              <Typography variant="caption" color="text.secondary">Total Inactive Users</Typography>
-              <Typography variant="h4" fontWeight="bold" color="#ff4d4f">
-                {summary?.totalInactive || 0}
-              </Typography>
-            </Paper>
-          </Grid>
-          <Grid item xs={12} sm={6} md={4}>
-            <Paper sx={{ p: 2, borderRadius: 2, textAlign: "center" }}>
-              <Typography variant="caption" color="text.secondary">Users + Admins</Typography>
-              <Typography variant="h4" fontWeight="bold" color="#DAA520">
-                {summary?.totalUsersAndAdmins || 0}
-              </Typography>
+          <Grid item xs={12} sm={6} md={3}>
+            <Paper sx={{ p: 2, borderRadius: 2, height: "100%" }}>
+              <Stack direction="row" justifyContent="space-between" mb={1}>
+                <Typography
+                  variant="subtitle2"
+                  fontWeight="bold"
+                  color="#722ed1"
+                >
+                  Sessions
+                </Typography>
+                <Chip
+                  label={`Total: ${sessions.total || 0}`}
+                  size="small"
+                  sx={{
+                    bgcolor: "#722ed120",
+                    color: "#722ed1",
+                    fontWeight: 600,
+                  }}
+                />
+              </Stack>
+              <Divider sx={{ mb: 1 }} />
+              <NumRow
+                label="Active"
+                value={sessions.active}
+                color="#389e0d"
+                bold
+              />
+              <NumRow
+                label="Inactive"
+                value={(sessions.total || 0) - (sessions.active || 0)}
+              />
             </Paper>
           </Grid>
         </Grid>
 
-        {/* Status Distribution Tables */}
-        <Grid container spacing={2} sx={{ mt: 1 }}>
-          <Grid item xs={12} md={4}>
-            <Paper sx={{ p: 2, borderRadius: 2 }}>
-              <Typography variant="h6" fontWeight="bold" sx={{ mb: 2, color: "#1890ff" }}>
-                Users Status
-              </Typography>
-              <Stack spacing={1}>
-                <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", p: 1, bgcolor: "#f5f5f5", borderRadius: 1 }}>
-                  <Typography variant="body2">Active</Typography>
-                  <Chip label={users?.status?.active || 0} size="small" sx={{ bgcolor: "#52c41a", color: "white" }} />
-                </Box>
-                <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", p: 1, bgcolor: "#f5f5f5", borderRadius: 1 }}>
-                  <Typography variant="body2">Inactive</Typography>
-                  <Chip label={users?.status?.inactive || 0} size="small" sx={{ bgcolor: "#ff4d4f", color: "white" }} />
-                </Box>
-              </Stack>
-            </Paper>
-          </Grid>
-
-          <Grid item xs={12} md={4}>
-            <Paper sx={{ p: 2, borderRadius: 2 }}>
-              <Typography variant="h6" fontWeight="bold" sx={{ mb: 2, color: "#DAA520" }}>
-                Admins Status
-              </Typography>
-              <Stack spacing={1}>
-                <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", p: 1, bgcolor: "#f5f5f5", borderRadius: 1 }}>
-                  <Typography variant="body2">Active</Typography>
-                  <Chip label={admins?.status?.active || 0} size="small" sx={{ bgcolor: "#52c41a", color: "white" }} />
-                </Box>
-                <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", p: 1, bgcolor: "#f5f5f5", borderRadius: 1 }}>
-                  <Typography variant="body2">Inactive</Typography>
-                  <Chip label={admins?.status?.inactive || 0} size="small" sx={{ bgcolor: "#ff4d4f", color: "white" }} />
-                </Box>
-              </Stack>
-            </Paper>
-          </Grid>
-
-          <Grid item xs={12} md={4}>
-            <Paper sx={{ p: 2, borderRadius: 2 }}>
-              <Typography variant="h6" fontWeight="bold" sx={{ mb: 2, color: "#f44336" }}>
-                Super Admins Status
-              </Typography>
-              <Stack spacing={1}>
-                <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", p: 1, bgcolor: "#f5f5f5", borderRadius: 1 }}>
-                  <Typography variant="body2">Active</Typography>
-                  <Chip label={superAdmins?.status?.active || 0} size="small" sx={{ bgcolor: "#52c41a", color: "white" }} />
-                </Box>
-                <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", p: 1, bgcolor: "#f5f5f5", borderRadius: 1 }}>
-                  <Typography variant="body2">Inactive</Typography>
-                  <Chip label={superAdmins?.status?.inactive || 0} size="small" sx={{ bgcolor: "#ff4d4f", color: "white" }} />
-                </Box>
-              </Stack>
-            </Paper>
-          </Grid>
-        </Grid>
-
-        {/* Summary Footer */}
-        <Paper sx={{ p: 2, mt: 2, borderRadius: 2, bgcolor: "#fafafa" }}>
-          <Grid container spacing={2}>
-            <Grid item xs={6} md={3}>
-              <Box textAlign="center">
-                <Typography variant="caption" color="text.secondary">Total Users</Typography>
-                <Typography variant="h6" fontWeight="bold" color="#1890ff">{users?.total || 0}</Typography>
-              </Box>
-            </Grid>
-            <Grid item xs={6} md={3}>
-              <Box textAlign="center">
-                <Typography variant="caption" color="text.secondary">Total Admins</Typography>
-                <Typography variant="h6" fontWeight="bold" color="#DAA520">{admins?.total || 0}</Typography>
-              </Box>
-            </Grid>
-            <Grid item xs={6} md={3}>
-              <Box textAlign="center">
-                <Typography variant="caption" color="text.secondary">Super Admins</Typography>
-                <Typography variant="h6" fontWeight="bold" color="#f44336">{superAdmins?.total || 0}</Typography>
-              </Box>
-            </Grid>
-            <Grid item xs={6} md={3}>
-              <Box textAlign="center">
-                <Typography variant="caption" color="text.secondary">Grand Total</Typography>
-                <Typography variant="h6" fontWeight="bold" color="#722ed1">{totalRecords || 0}</Typography>
-              </Box>
-            </Grid>
-          </Grid>
+        {/* Construction breakdown */}
+        <Paper sx={{ p: 2, mt: 2, borderRadius: 2 }}>
+          <Stack direction="row" justifyContent="space-between" mb={1}>
+            <Typography variant="h6" fontWeight="bold" color="#13c2c2">
+              Construction Work Breakdown
+            </Typography>
+            <Chip
+              label={`Total: ${construction.total || 0}`}
+              size="small"
+              sx={{ bgcolor: "#13c2c220", color: "#13c2c2", fontWeight: 600 }}
+            />
+          </Stack>
+          <Divider sx={{ mb: 1 }} />
+          {construction.total === 0 ? (
+            <Typography variant="body2" color="text.secondary">
+              No construction records.
+            </Typography>
+          ) : (
+            Object.entries(construction.fields || {}).map(([key, val]) => (
+              <ConstructionRow
+                key={key}
+                label={key
+                  .replace(/([A-Z])/g, " $1")
+                  .replace(/^./, (c) => c.toUpperCase())}
+                data={val}
+              />
+            ))
+          )}
         </Paper>
-
       </Container>
     </Box>
   );
 };
 
-export default SuperDashboard;
+export default AdminDashboard;

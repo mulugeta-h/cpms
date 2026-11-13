@@ -102,13 +102,29 @@ const TopBar = ({ title, isMobile, onMenuClick, sidebarWidth = 0 }) => {
     setAnchorEl(null);
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+  handleMenuClose();
+
+  const token = localStorage.getItem('token');
+
+  try {
+    if (token) {
+      await axios.post(
+        `${import.meta.env.VITE_API_URL}/api/user/logout`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+    }
+  } catch (err) {
+    // Don't block logout — the server will still invalidate via inactivity
+    console.error('Logout API failed:', err.response?.data || err.message);
+  } finally {
     localStorage.removeItem('user');
     localStorage.removeItem('token');
     setUser(null);
     navigate('/login', { replace: true });
-    handleMenuClose();
-  };
+  }
+};
 
   const handleChangePassword = async () => {
     const { oldPassword, newPassword, confirmPassword } = pwdForm;

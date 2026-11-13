@@ -3,29 +3,59 @@ const Estimation = require("../models/Estimation");
 const { EstimationRequest } = require("../models/EstimationRequest");
 
 /* =====================================================
-   READ — Distinct estimationIds from EstimationRequest
-   where status = "In Progress" that DO NOT yet have an
-   Estimation. (Mirrors getInProgressDCIds)
+   Role/identity helpers
+===================================================== */
+const getRole = (user) =>
+  String(user?.role ?? user?.userRole ?? "").trim().toUpperCase();
+
+const getUsername = (user) => {
+  if (!user) return "";
+  return String(user.username || user.name || user.email || "").trim();
+};
+
+const isUserRole    = (role) => role === "USER";
+const isAllViewRole = (role) => role === "ALL_VIEW";
+const isAdminRole   = (role) => role === "EST_ADMIN" || role === "ALL_ADMIN";
+
+/* =====================================================
+   READ — In-Progress estimationIds without an Estimation
 ===================================================== */
 const getInProgressEstimationIds = async (req, res) => {
   try {
-    const rows = await EstimationRequest.find(
-      { status: "In Progress" },
-      { estimationId: 1, propertyAddress: 1, _id: 0 }
-    )
+    const role = getRole(req.user);
+    const username = getUsername(req.user);
+
+    const filter = { status: "In Progress" };
+
+    if (isUserRole(role)) {
+      if (!username) {
+        return res.status(200).json({ success: true, count: 0, data: [] });
+      }
+      filter.assignedTo = username;
+    } else if (isAdminRole(role)) {
+      if (!username) {
+        return res.status(200).json({ success: true, count: 0, data: [] });
+      }
+      filter.assignedBy = username;
+    } else if (isAllViewRole(role)) {
+      // sees all In-Progress requests
+    } else {
+      return res.status(200).json({ success: true, count: 0, data: [] });
+    }
+
+    const rows = await EstimationRequest.find(filter, {
+      estimationId: 1,
+      propertyAddress: 1,
+      _id: 0,
+    })
       .sort({ estimationId: 1 })
       .lean();
 
     if (!rows.length) {
-      return res.status(200).json({
-        success: true,
-        count: 0,
-        data: [],
-      });
+      return res.status(200).json({ success: true, count: 0, data: [] });
     }
 
     const usedEstimationIds = await Estimation.distinct("estimationId");
-
     const usedSet = new Set(
       usedEstimationIds.map((v) => String(v || "").trim()).filter(Boolean)
     );
@@ -36,16 +66,9 @@ const getInProgressEstimationIds = async (req, res) => {
     for (const r of rows) {
       const id = String(r.estimationId || "").trim();
       const place = String(r.propertyAddress || "").trim();
-
-      if (!id) continue;
-      if (seen.has(id)) continue;
-      if (usedSet.has(id)) continue;
-
+      if (!id || seen.has(id) || usedSet.has(id)) continue;
       seen.add(id);
-      cleaned.push({
-        estimationId: id,
-        propertyAddress: place,
-      });
+      cleaned.push({ estimationId: id, propertyAddress: place });
     }
 
     return res.status(200).json({
@@ -55,7 +78,6 @@ const getInProgressEstimationIds = async (req, res) => {
     });
   } catch (error) {
     console.error("getInProgressEstimationIds error:", error);
-
     return res.status(500).json({
       success: false,
       message: "Failed to fetch in-progress estimation Ids",
@@ -65,12 +87,20 @@ const getInProgressEstimationIds = async (req, res) => {
 };
 
 /* =====================================================
-   CREATE — Create a new Estimation
-   estimationId comes from the picked EstimationRequest.
-   (Mirrors createSpecification, but links to a request)
+   CREATE — USER only, own assigned request
 ===================================================== */
 const createEstimation = async (req, res) => {
   try {
+    const role = getRole(req.user);
+    const username = getUsername(req.user);
+
+    if (!isUserRole(role)) {
+      return res.status(403).json({
+        success: false,
+        message: "Your role is not allowed to create estimations",
+      });
+    }
+
     const {
       estimationId,
       numberOfProperties,
@@ -85,16 +115,32 @@ const createEstimation = async (req, res) => {
     } = req.body;
 
     if (!estimationId) {
-      return res.status(400).json({
-        success: false,
-        message: "estimationId is required",
-      });
+      return res
+        .status(400)
+        .json({ success: false, message: "estimationId is required" });
     }
-
     if (!numberOfProperties || numberOfProperties < 1) {
       return res.status(400).json({
         success: false,
         message: "numberOfProperties is required and must be >= 1",
+      });
+    }
+    if (!username) {
+      return res
+        .status(403)
+        .json({ success: false, message: "Not authorized" });
+    }
+
+    const ownsRequest = await EstimationRequest.exists({
+      estimationId,
+      assignedTo: username,
+    });
+
+    if (!ownsRequest) {
+      return res.status(403).json({
+        success: false,
+        message:
+          "Not authorized to create an estimation for this estimationId",
       });
     }
 
@@ -109,6 +155,7 @@ const createEstimation = async (req, res) => {
 
     const estimation = await Estimation.create({
       estimationId,
+      createdBy: username,
       numberOfProperties,
       estimationSiteVisitDate,
       estimationReleaseDate,
@@ -127,7 +174,6 @@ const createEstimation = async (req, res) => {
     });
   } catch (error) {
     console.error("createEstimation error:", error);
-
     if (error.code === 11000) {
       return res.status(409).json({
         success: false,
@@ -135,7 +181,6 @@ const createEstimation = async (req, res) => {
         field: Object.keys(error.keyPattern || {}).join(", "),
       });
     }
-
     return res.status(500).json({
       success: false,
       message: "Failed to create estimation",
@@ -146,10 +191,16 @@ const createEstimation = async (req, res) => {
 
 /* =====================================================
    READ — Get all Estimations (joined with EstimationRequest)
+   USER      → assignedTo === username
+   ADMINS    → assignedBy === username
+   ALL_VIEW  → everything
 ===================================================== */
 const getAllEstimations = async (req, res) => {
   try {
-    const estimations = await Estimation.aggregate([
+    const role = getRole(req.user);
+    const username = getUsername(req.user);
+
+    const pipeline = [
       {
         $lookup: {
           from: EstimationRequest.collection.name,
@@ -164,12 +215,35 @@ const getAllEstimations = async (req, res) => {
           preserveNullAndEmptyArrays: true,
         },
       },
+    ];
+
+    if (isUserRole(role)) {
+      if (!username) {
+        return res.status(200).json({ success: true, count: 0, data: [] });
+      }
+      pipeline.push({
+        $match: { "estimationRequest.assignedTo": username },
+      });
+    } else if (isAdminRole(role)) {
+      if (!username) {
+        return res.status(200).json({ success: true, count: 0, data: [] });
+      }
+      pipeline.push({
+        $match: { "estimationRequest.assignedBy": username },
+      });
+    } else if (isAllViewRole(role)) {
+      // no filter → sees everything
+    } else {
+      return res.status(200).json({ success: true, count: 0, data: [] });
+    }
+
+    pipeline.push(
       {
         $project: {
           _id: 1,
           estimationId: 1,
+          createdBy: 1,
 
-          // Estimation fields
           numberOfProperties: 1,
           estimationSiteVisitDate: 1,
           estimationReleaseDate: 1,
@@ -180,7 +254,6 @@ const getAllEstimations = async (req, res) => {
           estimationNumber: 1,
           remark: 1,
 
-          // EstimationRequest fields
           requestingOrgan: "$estimationRequest.requestingOrgan",
           applicantName: "$estimationRequest.applicantName",
           propertyOwner: "$estimationRequest.propertyOwner",
@@ -196,8 +269,10 @@ const getAllEstimations = async (req, res) => {
           updatedAt: 1,
         },
       },
-      { $sort: { createdAt: -1 } },
-    ]);
+      { $sort: { createdAt: -1 } }
+    );
+
+    const estimations = await Estimation.aggregate(pipeline);
 
     return res.status(200).json({
       success: true,
@@ -219,22 +294,58 @@ const getAllEstimations = async (req, res) => {
 ===================================================== */
 const getEstimationById = async (req, res) => {
   try {
-    const estimation = await Estimation.findById(req.params.id);
+    const role = getRole(req.user);
+    const username = getUsername(req.user);
 
+    const estimation = await Estimation.findById(req.params.id);
     if (!estimation) {
-      return res.status(404).json({
-        success: false,
-        message: "Estimation not found",
-      });
+      return res
+        .status(404)
+        .json({ success: false, message: "Estimation not found" });
     }
 
-    return res.status(200).json({
-      success: true,
-      data: estimation,
+    if (isAllViewRole(role)) {
+      return res.status(200).json({ success: true, data: estimation });
+    }
+
+    if (isUserRole(role)) {
+      const owns = username
+        ? await EstimationRequest.exists({
+            estimationId: estimation.estimationId,
+            assignedTo: username,
+          })
+        : null;
+      if (!owns) {
+        return res.status(403).json({
+          success: false,
+          message: "Not authorized to view this estimation",
+        });
+      }
+      return res.status(200).json({ success: true, data: estimation });
+    }
+
+    if (isAdminRole(role)) {
+      const owns = username
+        ? await EstimationRequest.exists({
+            estimationId: estimation.estimationId,
+            assignedBy: username,
+          })
+        : null;
+      if (!owns) {
+        return res.status(403).json({
+          success: false,
+          message: "Not authorized to view this estimation",
+        });
+      }
+      return res.status(200).json({ success: true, data: estimation });
+    }
+
+    return res.status(403).json({
+      success: false,
+      message: "Not authorized to view this estimation",
     });
   } catch (error) {
     console.error("getEstimationById error:", error);
-
     return res.status(500).json({
       success: false,
       message: "Failed to fetch estimation",
@@ -248,10 +359,12 @@ const getEstimationById = async (req, res) => {
 ===================================================== */
 const getEstimationByEstimationId = async (req, res) => {
   try {
+    const role = getRole(req.user);
+    const username = getUsername(req.user);
+
     const estimation = await Estimation.findOne({
       estimationId: req.params.estimationId,
     });
-
     if (!estimation) {
       return res.status(404).json({
         success: false,
@@ -259,13 +372,48 @@ const getEstimationByEstimationId = async (req, res) => {
       });
     }
 
-    return res.status(200).json({
-      success: true,
-      data: estimation,
+    if (isAllViewRole(role)) {
+      return res.status(200).json({ success: true, data: estimation });
+    }
+
+    if (isUserRole(role)) {
+      const owns = username
+        ? await EstimationRequest.exists({
+            estimationId: estimation.estimationId,
+            assignedTo: username,
+          })
+        : null;
+      if (!owns) {
+        return res.status(403).json({
+          success: false,
+          message: "Not authorized to view this estimation",
+        });
+      }
+      return res.status(200).json({ success: true, data: estimation });
+    }
+
+    if (isAdminRole(role)) {
+      const owns = username
+        ? await EstimationRequest.exists({
+            estimationId: estimation.estimationId,
+            assignedBy: username,
+          })
+        : null;
+      if (!owns) {
+        return res.status(403).json({
+          success: false,
+          message: "Not authorized to view this estimation",
+        });
+      }
+      return res.status(200).json({ success: true, data: estimation });
+    }
+
+    return res.status(403).json({
+      success: false,
+      message: "Not authorized to view this estimation",
     });
   } catch (error) {
     console.error("getEstimationByEstimationId error:", error);
-
     return res.status(500).json({
       success: false,
       message: "Failed to fetch estimation",
@@ -275,31 +423,90 @@ const getEstimationByEstimationId = async (req, res) => {
 };
 
 /* =====================================================
-   UPDATE — Update Estimation by ID
+   UPDATE — USER only, own assigned request
 ===================================================== */
 const updateEstimation = async (req, res) => {
   try {
-    const estimation = await Estimation.findByIdAndUpdate(
-      req.params.id,
-      { $set: req.body },
-      { new: true, runValidators: true }
-    );
+    const role = getRole(req.user);
+    const username = getUsername(req.user);
 
-    if (!estimation) {
-      return res.status(404).json({
+    if (!isUserRole(role)) {
+      return res.status(403).json({
         success: false,
-        message: "Estimation not found",
+        message: "Your role is not allowed to edit estimations",
       });
     }
+
+    const { status, ...estimationFields } = req.body || {};
+
+    const estimation = await Estimation.findById(req.params.id);
+    if (!estimation) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Estimation not found" });
+    }
+
+    const owns = username
+      ? await EstimationRequest.exists({
+          estimationId: estimation.estimationId,
+          assignedTo: username,
+        })
+      : null;
+    if (!owns) {
+      return res.status(403).json({
+        success: false,
+        message: "Not authorized to update this estimation",
+      });
+    }
+
+    let updatedRequest = null;
+
+    if (status !== undefined) {
+      if (!["In Progress", "Completed", "Rejected"].includes(status)) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Invalid status. Allowed values: In Progress, Completed, Rejected",
+        });
+      }
+
+      const request = await EstimationRequest.findOne({
+        estimationId: estimation.estimationId,
+      });
+      if (!request) {
+        return res.status(404).json({
+          success: false,
+          message: "Linked EstimationRequest not found for this estimationId",
+        });
+      }
+      if (request.status !== "In Progress") {
+        return res.status(403).json({
+          success: false,
+          message: `Status cannot be changed because the request is already "${request.status}". Only "In Progress" requests can be modified.`,
+        });
+      }
+      request.status = status;
+      updatedRequest = await request.save();
+    }
+
+    delete estimationFields._id;
+    delete estimationFields.estimationId;
+    delete estimationFields.createdBy;
+
+    const updatedEstimation = await Estimation.findByIdAndUpdate(
+      req.params.id,
+      { $set: estimationFields },
+      { new: true, runValidators: true }
+    );
 
     return res.status(200).json({
       success: true,
       message: "Estimation updated successfully",
-      data: estimation,
+      data: updatedEstimation,
+      ...(updatedRequest && { requestStatus: updatedRequest.status }),
     });
   } catch (error) {
     console.error("updateEstimation error:", error);
-
     if (error.code === 11000) {
       return res.status(409).json({
         success: false,
@@ -307,7 +514,6 @@ const updateEstimation = async (req, res) => {
         field: Object.keys(error.keyPattern || {}).join(", "),
       });
     }
-
     return res.status(500).json({
       success: false,
       message: "Failed to update estimation",
@@ -317,31 +523,87 @@ const updateEstimation = async (req, res) => {
 };
 
 /* =====================================================
-   UPDATE — Upsert by estimationId
+   UPDATE — Upsert (USER only)
 ===================================================== */
 const upsertEstimationByEstimationId = async (req, res) => {
   try {
-    const { estimationId } = req.params;
+    const role = getRole(req.user);
+    const username = getUsername(req.user);
 
-    const estimation = await Estimation.findOneAndUpdate(
-      { estimationId },
-      { $set: { ...req.body, estimationId } },
-      {
-        new: true,
-        upsert: true,
-        runValidators: true,
-        setDefaultsOnInsert: true,
+    if (!isUserRole(role)) {
+      return res.status(403).json({
+        success: false,
+        message: "Your role is not allowed to edit estimations",
+      });
+    }
+
+    const { estimationId } = req.params;
+    const { status, ...estimationFields } = req.body || {};
+
+    const owns = username
+      ? await EstimationRequest.exists({
+          estimationId,
+          assignedTo: username,
+        })
+      : null;
+    if (!owns) {
+      return res.status(403).json({
+        success: false,
+        message: "Not authorized to save this estimation",
+      });
+    }
+
+    let updatedRequest = null;
+
+    if (status !== undefined) {
+      if (!["In Progress", "Completed", "Rejected"].includes(status)) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Invalid status. Allowed values: In Progress, Completed, Rejected",
+        });
       }
-    );
+      const request = await EstimationRequest.findOne({ estimationId });
+      if (!request) {
+        return res.status(404).json({
+          success: false,
+          message: "Linked EstimationRequest not found for this estimationId",
+        });
+      }
+      if (request.status !== "In Progress") {
+        return res.status(403).json({
+          success: false,
+          message: `Status cannot be changed because the request is already "${request.status}". Only "In Progress" requests can be modified.`,
+        });
+      }
+      request.status = status;
+      updatedRequest = await request.save();
+    }
+
+    delete estimationFields._id;
+    delete estimationFields.createdBy;
+
+    const existing = await Estimation.findOne({ estimationId });
+    const estimation = existing
+      ? await Estimation.findByIdAndUpdate(
+          existing._id,
+          { $set: estimationFields },
+          { new: true, runValidators: true }
+        )
+      : await Estimation.create({
+          ...estimationFields,
+          estimationId,
+          createdBy: username,
+        });
 
     return res.status(200).json({
       success: true,
       message: "Estimation saved successfully",
       data: estimation,
+      ...(updatedRequest && { requestStatus: updatedRequest.status }),
     });
   } catch (error) {
     console.error("upsertEstimationByEstimationId error:", error);
-
     if (error.code === 11000) {
       return res.status(409).json({
         success: false,
@@ -349,7 +611,6 @@ const upsertEstimationByEstimationId = async (req, res) => {
         field: Object.keys(error.keyPattern || {}).join(", "),
       });
     }
-
     return res.status(500).json({
       success: false,
       message: "Failed to save estimation",
@@ -359,18 +620,35 @@ const upsertEstimationByEstimationId = async (req, res) => {
 };
 
 /* =====================================================
-   DELETE — Delete Estimation by ID
+   DELETE — EST_ADMIN / ALL_ADMIN only, own createdBy only
 ===================================================== */
 const deleteEstimation = async (req, res) => {
   try {
-    const estimation = await Estimation.findByIdAndDelete(req.params.id);
+    const role = getRole(req.user);
+    const username = getUsername(req.user);
 
-    if (!estimation) {
-      return res.status(404).json({
+    if (!isAdminRole(role)) {
+      return res.status(403).json({
         success: false,
-        message: "Estimation not found",
+        message: "Your role is not allowed to delete estimations",
       });
     }
+
+    const estimation = await Estimation.findById(req.params.id);
+    if (!estimation) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Estimation not found" });
+    }
+
+    if (estimation.createdBy !== username) {
+      return res.status(403).json({
+        success: false,
+        message: "You can only delete estimations you created",
+      });
+    }
+
+    await Estimation.findByIdAndDelete(req.params.id);
 
     return res.status(200).json({
       success: true,
@@ -379,7 +657,6 @@ const deleteEstimation = async (req, res) => {
     });
   } catch (error) {
     console.error("deleteEstimation error:", error);
-
     return res.status(500).json({
       success: false,
       message: "Failed to delete estimation",
@@ -389,20 +666,40 @@ const deleteEstimation = async (req, res) => {
 };
 
 /* =====================================================
-   DELETE — Delete Estimation by estimationId
+   DELETE — By estimationId (admins, own createdBy only)
 ===================================================== */
 const deleteEstimationByEstimationId = async (req, res) => {
   try {
-    const estimation = await Estimation.findOneAndDelete({
+    const role = getRole(req.user);
+    const username = getUsername(req.user);
+
+    if (!isAdminRole(role)) {
+      return res.status(403).json({
+        success: false,
+        message: "Your role is not allowed to delete estimations",
+      });
+    }
+
+    const estimation = await Estimation.findOne({
       estimationId: req.params.estimationId,
     });
-
     if (!estimation) {
       return res.status(404).json({
         success: false,
         message: "Estimation not found for this estimationId",
       });
     }
+
+    if (estimation.createdBy !== username) {
+      return res.status(403).json({
+        success: false,
+        message: "You can only delete estimations you created",
+      });
+    }
+
+    await Estimation.findOneAndDelete({
+      estimationId: req.params.estimationId,
+    });
 
     return res.status(200).json({
       success: true,
@@ -411,7 +708,6 @@ const deleteEstimationByEstimationId = async (req, res) => {
     });
   } catch (error) {
     console.error("deleteEstimationByEstimationId error:", error);
-
     return res.status(500).json({
       success: false,
       message: "Failed to delete estimation",

@@ -1,7 +1,7 @@
 const crypto = require("crypto");
 const Session = require("../models/Session");
 
-const INACTIVITY_MS = 15 * 60 * 1000;
+const INACTIVITY_MS = 1 * 60 * 1000;
 
 function createSessionToken() {
   return crypto.randomBytes(32).toString("hex");
@@ -9,20 +9,24 @@ function createSessionToken() {
 
 async function createSession(userId, deviceId, ipAddress, userAgent) {
   const sessionToken = createSessionToken();
+  const now = new Date();
 
   const session = await Session.findOneAndUpdate(
     { user: userId },
     {
-      user: userId,
-      refreshToken: sessionToken,
-      deviceId,
-      ipAddress: ipAddress || "unknown",
-      userAgent: userAgent || "unknown",
-      lastActivity: new Date(),
-      lastLoginAt: new Date(),
-      isActive: true,
+      $set: {
+        user: userId,
+        refreshToken: sessionToken,
+        deviceId,
+        ipAddress: ipAddress || "unknown",
+        userAgent: userAgent || "unknown",
+        lastActivity: now,
+        lastIn: now,       // 👈 was "lastLoginAt" — not in schema
+        lastSeen: now,     // 👈 was missing entirely
+        isActive: true,
+      },
     },
-    { upsert: true, new: true, setDefaultsOnInsert: true },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
   );
 
   return { session, sessionToken };
@@ -43,15 +47,18 @@ async function validateSession(userId, sessionId, deviceId) {
     return { valid: false, msg: "Session invalid. Please log in again." };
   }
 
-  const inactiveMs = Date.now() - new Date(session.lastActivity).getTime();
+  const now = new Date();
+  const inactiveMs = now - new Date(session.lastActivity).getTime();
+
   if (inactiveMs > INACTIVITY_MS) {
     session.isActive = false;
-    session.lastLogoutAt = new Date();
+    session.lastSeen = now;
     await session.save();
     return { valid: false, msg: "Session expired due to inactivity." };
   }
 
-  session.lastActivity = new Date();
+  session.lastActivity = now;
+  session.lastSeen = now;   // 👈 heartbeat on every request
   await session.save();
 
   return { valid: true, session };
@@ -60,7 +67,7 @@ async function validateSession(userId, sessionId, deviceId) {
 async function invalidateSession(userId) {
   await Session.findOneAndUpdate(
     { user: userId },
-    { isActive: false, lastLogoutAt: new Date() },
+    { $set: { isActive: false, lastSeen: new Date() } }
   );
 }
 

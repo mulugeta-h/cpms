@@ -1,13 +1,65 @@
 // controllers/EstimationRequestController.js
 const { EstimationRequest, getNextEST } = require("../models/EstimationRequest");
+const Estimation = require("../models/Estimation");
 const User = require("../models/User");
 const mongoose = require("mongoose");
 
 // =====================================================
-// CREATE - Create a new estimation request
+// ROLE HELPERS (SUPER_ADMIN ignored per spec)
+// =====================================================
+const getRole = (req) =>
+  String(req.user?.role || req.user?.userRole || "").toUpperCase();
+
+const actorName = (req) => req.user?.name || "";
+const actorUsername = (req) => req.user?.username || req.user?.name || "";
+const actorId = (req) =>
+  String(req.user?.id || req.user?._id || req.user?.sub || "");
+
+// All admin roles behave identically for this module
+const isAdminRole = (req) =>
+  ["ALL_ADMIN", "EST_ADMIN", "DC_ADMIN"].includes(getRole(req));
+const isViewOnly = (req) => getRole(req) === "ALL_VIEW";
+const isUserRole = (req) => getRole(req) === "USER";
+
+// Only ALL_VIEW sees everyone's records
+const canViewAll = (req) => isViewOnly(req);
+
+// Only admins create
+const canCreate = (req) => isAdminRole(req);
+
+// Owner check — creator of the request
+const isOwner = (req, doc) => {
+  const by = String(doc?.assignedBy || "").trim();
+  if (!by) return false;
+  return by === actorName(req) || by === actorUsername(req);
+};
+
+// Manage = admin + owner
+const canManage = (req, doc) => isAdminRole(req) && isOwner(req, doc);
+
+// Read access for a single doc
+const canReadOne = (req, doc) => {
+  if (isViewOnly(req)) return true;
+  if (isAdminRole(req)) return isOwner(req, doc);
+  if (isUserRole(req)) {
+    const to = String(doc?.assignedTo || "").trim();
+    return !!to && (to === actorUsername(req) || to === actorId(req));
+  }
+  return false;
+};
+
+// =====================================================
+// CREATE — any admin
 // =====================================================
 const createEstimationRequest = async (req, res) => {
   try {
+    if (!canCreate(req)) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not allowed to create estimation requests",
+      });
+    }
+
     const {
       requestingOrgan,
       applicantName,
@@ -15,22 +67,18 @@ const createEstimationRequest = async (req, res) => {
       propertyAddress,
       purposeOfValuation,
       typeOfProperty,
-      assignedBy,
       assignedTo,
-      status
+      status,
     } = req.body;
 
-    // Validate required fields
     if (!requestingOrgan || !applicantName || !propertyOwner || !propertyAddress) {
       return res.status(400).json({
         success: false,
         message:
-          "Missing required fields: requestingOrgan, applicantName, propertyOwner, propertyAddress are required"
+          "Missing required fields: requestingOrgan, applicantName, propertyOwner, propertyAddress are required",
       });
     }
 
-    // Create new estimation request (estimationId is generated
-    // in the model's pre('save') hook via getNextEST())
     const estimationRequest = new EstimationRequest({
       requestingOrgan,
       applicantName,
@@ -38,15 +86,15 @@ const createEstimationRequest = async (req, res) => {
       propertyAddress,
       purposeOfValuation: purposeOfValuation || "not described",
       typeOfProperty: typeOfProperty || "not described",
-      assignedBy: assignedBy || "",
+      // Server always stamps the creator — client cannot spoof
+      assignedBy: actorName(req) || actorUsername(req),
       assignedTo: assignedTo || "",
-      status: status || "Pending"
+      status: status || "Pending",
     });
 
     try {
       await estimationRequest.save();
     } catch (error) {
-      // E11000 = duplicate key. Retry once with a fresh ID.
       if (error && error.code === 11000 && error.message.includes("estimationId")) {
         estimationRequest.estimationId = undefined;
         await estimationRequest.save();
@@ -58,26 +106,56 @@ const createEstimationRequest = async (req, res) => {
     res.status(201).json({
       success: true,
       message: "Estimation request created successfully",
-      data: estimationRequest
+      data: estimationRequest,
     });
   } catch (error) {
     console.error("Error creating estimation request:", error);
     res.status(500).json({
       success: false,
       message: "Failed to create estimation request",
-      error: error.message
+      error: error.message,
     });
   }
 };
 
 // =====================================================
-// READ - Get ALL estimation requests
-// (no query params, no filtering, no pagination —
-//  frontend fetches once and filters in memory)
+// READ ALL — scoped by role
+// - ADMIN roles → own only
+// - ALL_VIEW    → everything
+// - USER        → assigned only
 // =====================================================
 const getAllEstimationRequests = async (req, res) => {
   try {
-    const estimationRequests = await EstimationRequest.find()
+    let filter = {};
+    let scope = "all";
+
+    if (isAdminRole(req)) {
+      filter = {
+        $or: [
+          { assignedBy: actorName(req) },
+          { assignedBy: actorUsername(req) },
+        ],
+      };
+      scope = "own";
+    } else if (isUserRole(req)) {
+      filter = {
+        $or: [
+          { assignedTo: actorUsername(req) },
+          { assignedTo: actorId(req) },
+        ],
+      };
+      scope = "assigned";
+    } else if (isViewOnly(req)) {
+      filter = {};
+      scope = "all";
+    } else {
+      return res.status(403).json({
+        success: false,
+        message: "You are not allowed to view estimation requests",
+      });
+    }
+
+    const estimationRequests = await EstimationRequest.find(filter)
       .sort({ requestDate: -1 })
       .lean();
 
@@ -85,20 +163,21 @@ const getAllEstimationRequests = async (req, res) => {
       success: true,
       message: "Estimation requests retrieved successfully",
       data: estimationRequests,
-      count: estimationRequests.length
+      count: estimationRequests.length,
+      scope,
     });
   } catch (error) {
     console.error("Error fetching estimation requests:", error);
     res.status(500).json({
       success: false,
       message: "Failed to fetch estimation requests",
-      error: error.message
+      error: error.message,
     });
   }
 };
 
 // =====================================================
-// READ - Get single estimation request by ID
+// READ ONE
 // =====================================================
 const getEstimationRequestById = async (req, res) => {
   try {
@@ -107,134 +186,146 @@ const getEstimationRequestById = async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid estimation request ID"
+        message: "Invalid estimation request ID",
       });
     }
 
     const estimationRequest = await EstimationRequest.findById(id);
-
     if (!estimationRequest) {
       return res.status(404).json({
         success: false,
-        message: "Estimation request not found"
+        message: "Estimation request not found",
+      });
+    }
+
+    if (!canReadOne(req, estimationRequest)) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have access to this request",
       });
     }
 
     res.status(200).json({
       success: true,
       message: "Estimation request retrieved successfully",
-      data: estimationRequest
+      data: estimationRequest,
     });
   } catch (error) {
     console.error("Error fetching estimation request:", error);
     res.status(500).json({
       success: false,
       message: "Failed to fetch estimation request",
-      error: error.message
+      error: error.message,
     });
   }
 };
 
 // =====================================================
-// READ - Get estimation request by estimationId
+// READ BY estimationId
 // =====================================================
 const getEstimationRequestByEstimationId = async (req, res) => {
   try {
     const { estimationId } = req.params;
 
     const estimationRequest = await EstimationRequest.findOne({ estimationId });
-
     if (!estimationRequest) {
       return res.status(404).json({
         success: false,
-        message: "Estimation request not found"
+        message: "Estimation request not found",
+      });
+    }
+
+    if (!canReadOne(req, estimationRequest)) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have access to this request",
       });
     }
 
     res.status(200).json({
       success: true,
       message: "Estimation request retrieved successfully",
-      data: estimationRequest
+      data: estimationRequest,
     });
   } catch (error) {
     console.error("Error fetching estimation request:", error);
     res.status(500).json({
       success: false,
       message: "Failed to fetch estimation request",
-      error: error.message
+      error: error.message,
     });
   }
 };
 
 // =====================================================
-// UPDATE - Update estimation request
+// UPDATE — owner only
 // =====================================================
 const updateEstimationRequest = async (req, res) => {
   try {
     const { id } = req.params;
-    const updateData = req.body;
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid estimation request ID"
+        message: "Invalid estimation request ID",
       });
     }
 
-    // Remove fields that shouldn't be updated
+    const existing = await EstimationRequest.findById(id);
+    if (!existing) {
+      return res.status(404).json({
+        success: false,
+        message: "Estimation request not found",
+      });
+    }
+
+    if (!canManage(req, existing)) {
+      return res.status(403).json({
+        success: false,
+        message: "You can only edit requests you created",
+      });
+    }
+
+    const updateData = { ...req.body };
     delete updateData._id;
     delete updateData.estimationId;
     delete updateData.createdAt;
     delete updateData.updatedAt;
+    delete updateData.assignedBy; // immutable
 
-    // Validate status if provided
     if (updateData.status) {
-      const validStatuses = [
-        "Pending",
-        "In Progress",
-        "Completed",
-        "Rejected",
-        "Cancelled"
-      ];
+      const validStatuses = ["Pending", "In Progress", "Completed", "Rejected", "Cancelled"];
       if (!validStatuses.includes(updateData.status)) {
         return res.status(400).json({
           success: false,
           message:
-            "Invalid status. Must be one of: Pending, In Progress, Completed, Rejected, Cancelled"
+            "Invalid status. Must be one of: Pending, In Progress, Completed, Rejected, Cancelled",
         });
       }
     }
 
-    const estimationRequest = await EstimationRequest.findByIdAndUpdate(
-      id,
-      updateData,
-      { new: true, runValidators: true }
-    );
-
-    if (!estimationRequest) {
-      return res.status(404).json({
-        success: false,
-        message: "Estimation request not found"
-      });
-    }
+    const updated = await EstimationRequest.findByIdAndUpdate(id, updateData, {
+      new: true,
+      runValidators: true,
+    });
 
     res.status(200).json({
       success: true,
       message: "Estimation request updated successfully",
-      data: estimationRequest
+      data: updated,
     });
   } catch (error) {
     console.error("Error updating estimation request:", error);
     res.status(500).json({
       success: false,
       message: "Failed to update estimation request",
-      error: error.message
+      error: error.message,
     });
   }
 };
 
 // =====================================================
-// UPDATE - Update status only
+// UPDATE STATUS — owner only
 // =====================================================
 const updateEstimationRequestStatus = async (req, res) => {
   try {
@@ -244,62 +335,63 @@ const updateEstimationRequestStatus = async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid estimation request ID"
+        message: "Invalid estimation request ID",
       });
     }
-
     if (!status) {
       return res.status(400).json({
         success: false,
-        message: "Status is required"
+        message: "Status is required",
       });
     }
 
-    const validStatuses = [
-      "Pending",
-      "In Progress",
-      "Completed",
-      "Rejected",
-      "Cancelled"
-    ];
+    const validStatuses = ["Pending", "In Progress", "Completed", "Rejected", "Cancelled"];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({
         success: false,
         message:
-          "Invalid status. Must be one of: Pending, In Progress, Completed, Rejected, Cancelled"
+          "Invalid status. Must be one of: Pending, In Progress, Completed, Rejected, Cancelled",
       });
     }
 
-    const estimationRequest = await EstimationRequest.findByIdAndUpdate(
+    const existing = await EstimationRequest.findById(id);
+    if (!existing) {
+      return res.status(404).json({
+        success: false,
+        message: "Estimation request not found",
+      });
+    }
+
+    if (!canManage(req, existing)) {
+      return res.status(403).json({
+        success: false,
+        message: "You can only update status for requests you created",
+      });
+    }
+
+    const updated = await EstimationRequest.findByIdAndUpdate(
       id,
       { status },
       { new: true, runValidators: true }
     );
 
-    if (!estimationRequest) {
-      return res.status(404).json({
-        success: false,
-        message: "Estimation request not found"
-      });
-    }
-
     res.status(200).json({
       success: true,
       message: "Estimation request status updated successfully",
-      data: estimationRequest
+      data: updated,
     });
   } catch (error) {
     console.error("Error updating estimation request status:", error);
     res.status(500).json({
       success: false,
       message: "Failed to update estimation request status",
-      error: error.message
+      error: error.message,
     });
   }
 };
 
 // =====================================================
-// DELETE - Delete estimation request
+// DELETE — owner only + cascade
 // =====================================================
 const deleteEstimationRequest = async (req, res) => {
   try {
@@ -308,36 +400,55 @@ const deleteEstimationRequest = async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid estimation request ID"
+        message: "Invalid estimation request ID",
       });
     }
 
-    const estimationRequest = await EstimationRequest.findByIdAndDelete(id);
-
+    const estimationRequest = await EstimationRequest.findById(id);
     if (!estimationRequest) {
       return res.status(404).json({
         success: false,
-        message: "Estimation request not found"
+        message: "Estimation request not found",
       });
     }
 
-    res.status(200).json({
+    if (!canManage(req, estimationRequest)) {
+      return res.status(403).json({
+        success: false,
+        message: "You can only delete requests you created",
+      });
+    }
+
+    const estimationId = estimationRequest.estimationId;
+    await EstimationRequest.findByIdAndDelete(id);
+
+    let deletedRelated = { estimation: 0 };
+    if (estimationId) {
+      const remaining = await EstimationRequest.countDocuments({ estimationId });
+      if (remaining === 0) {
+        const estRes = await Estimation.deleteMany({ estimationId });
+        deletedRelated.estimation = estRes.deletedCount || 0;
+      }
+    }
+
+    return res.status(200).json({
       success: true,
       message: "Estimation request deleted successfully",
-      data: estimationRequest
+      data: estimationRequest,
+      deletedRelated,
     });
   } catch (error) {
     console.error("Error deleting estimation request:", error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: "Failed to delete estimation request",
-      error: error.message
+      error: error.message,
     });
   }
 };
 
 // =====================================================
-// GET - Get next estimation ID (utility)
+// GET next estimation ID
 // =====================================================
 const getNextEstimationId = async (req, res) => {
   try {
@@ -345,30 +456,25 @@ const getNextEstimationId = async (req, res) => {
     res.status(200).json({
       success: true,
       message: "Next estimation ID generated successfully",
-      data: { nextEstimationId: nextId }
+      data: { nextEstimationId: nextId },
     });
   } catch (error) {
     console.error("Error generating next estimation ID:", error);
     res.status(500).json({
       success: false,
       message: "Failed to generate next estimation ID",
-      error: error.message
+      error: error.message,
     });
   }
 };
 
 // =====================================================
-// GET - Get statistics/summary
+// GET statistics
 // =====================================================
 const getEstimationStatistics = async (req, res) => {
   try {
     const stats = await EstimationRequest.aggregate([
-      {
-        $group: {
-          _id: "$status",
-          count: { $sum: 1 }
-        }
-      }
+      { $group: { _id: "$status", count: { $sum: 1 } } },
     ]);
 
     const total = await EstimationRequest.countDocuments();
@@ -378,7 +484,7 @@ const getEstimationStatistics = async (req, res) => {
       "In Progress": 0,
       Completed: 0,
       Rejected: 0,
-      Cancelled: 0
+      Cancelled: 0,
     };
 
     stats.forEach((stat) => {
@@ -388,49 +494,43 @@ const getEstimationStatistics = async (req, res) => {
     res.status(200).json({
       success: true,
       message: "Statistics retrieved successfully",
-      data: {
-        total,
-        ...statusMap
-      }
+      data: { total, ...statusMap },
     });
   } catch (error) {
     console.error("Error fetching statistics:", error);
     res.status(500).json({
       success: false,
       message: "Failed to fetch statistics",
-      error: error.message
+      error: error.message,
     });
   }
 };
 
 // =====================================================
-// GET - Get all users (for Assigned To dropdown)
+// GET users (Assigned To dropdown)
 // =====================================================
 const getUsers = async (req, res) => {
   try {
-    const users = await User.find({ role: "USER" })
-      .select("-password -__v")
+    const users = await User.find({ role: "USER", enabled: true })
+      .select("name username role")
       .sort({ createdAt: -1 });
 
     res.status(200).json({
       success: true,
       message: "Users retrieved successfully",
       data: users,
-      count: users.length
+      count: users.length,
     });
   } catch (error) {
     console.error("Error fetching users:", error);
     res.status(500).json({
       success: false,
       message: "Failed to fetch users",
-      error: error.message
+      error: error.message,
     });
   }
 };
 
-// =====================================================
-// EXPORT ALL CONTROLLERS
-// =====================================================
 module.exports = {
   createEstimationRequest,
   getAllEstimationRequests,
@@ -441,5 +541,5 @@ module.exports = {
   deleteEstimationRequest,
   getNextEstimationId,
   getEstimationStatistics,
-  getUsers
+  getUsers,
 };

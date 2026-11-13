@@ -13,6 +13,11 @@ const {
   deleteEstimationByEstimationId,
 } = require("../controllers/estimationController");
 
+const userAuth = require("../middleware/userAuth");
+
+// Apply authentication to all routes
+router.use(userAuth);
+
 // Dropdown source
 router.get("/inprogress-estimation-ids", getInProgressEstimationIds);
 

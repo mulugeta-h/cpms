@@ -47,9 +47,7 @@ import {
   Pending as PendingIcon,
   Engineering as EngineeringIcon,
   Place as PlaceIcon,
-  Business as BusinessIcon,
   Event as EventIcon,
-  HomeWork as HomeWorkIcon,
   Gavel as GavelIcon,
   Apartment as ApartmentIcon,
   FilterList as FilterListIcon,
@@ -70,7 +68,7 @@ const TYPE_OPTIONS = [
   "Multi Store",
   "Fuel Station",
   "Coffee Wash / Cattle Fattening",
-  "Other"
+  "Other",
 ];
 
 const EMPTY_REQUEST = {
@@ -170,13 +168,6 @@ const lightStyles = {
       boxShadow: "0 0 15px #FFD600",
     },
   },
-  yellowBorder: {
-    borderColor: "#FFD600",
-    "&:hover": {
-      borderColor: "#ffcc00",
-      backgroundColor: "rgba(255, 214, 0, 0.1)",
-    },
-  },
   dialogContent: { px: 3, py: 2.5 },
   dialogActions: {
     px: 3,
@@ -199,9 +190,6 @@ const scrollbarStyles = {
   },
 };
 
-// =====================================================
-// Reusable Select value row (icon + text + placeholder)
-// =====================================================
 const SelectValueRow = ({ icon, text, placeholder }) => (
   <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
     <Box
@@ -210,15 +198,10 @@ const SelectValueRow = ({ icon, text, placeholder }) => (
     >
       {icon}
     </Box>
-    {text ? (
-      <span>{text}</span>
-    ) : (
-      <em style={{ color: "#999" }}>{placeholder}</em>
-    )}
+    {text ? <span>{text}</span> : <em style={{ color: "#999" }}>{placeholder}</em>}
   </Box>
 );
 
-// Icon for a given status
 const statusIcon = (status, fontSize = 18) => {
   switch (status) {
     case "Completed":
@@ -247,11 +230,9 @@ const EstimationRequest = () => {
       const userData = decoded.user || decoded;
       return {
         id: userData.id || userData._id || userData.sub,
-        name: userData.name || userData.fullName || userData.username,
-        username: userData.username || userData.name,
+        name: userData.name,
+        username: userData.username,
         role: userData.role || userData.userRole,
-        email: userData.email,
-        fullName: userData.fullName || userData.name,
       };
     } catch (error) {
       console.error("Error decoding token:", error);
@@ -261,12 +242,33 @@ const EstimationRequest = () => {
 
   const loggedInUser = getLoggedInUserFromToken();
 
+  // ================= ROLE-BASED ACCESS =================
+  const role = String(loggedInUser?.role || "").toUpperCase();
+
+  // All *_ADMIN behave identically: see/create/manage only their own
+  const isAdminRole =
+    role === "ALL_ADMIN" || role === "EST_ADMIN" || role === "DC_ADMIN";
+  const isViewOnly = role === "ALL_VIEW";
+  const isUser = role === "USER";
+
+  const canCreate = isAdminRole;
+  const myName = loggedInUser?.name || "";
+  const myUsername = loggedInUser?.username || loggedInUser?.name || "";
+
+  const isOwner = (record) => {
+    if (!record) return false;
+    const by = String(record.assignedBy || "").trim();
+    if (!by) return false;
+    return by === myName || by === myUsername;
+  };
+
+  const canEdit = (record) => isAdminRole && isOwner(record);
+  const canDelete = (record) => isAdminRole && isOwner(record);
+  const canChangeStatus = (record) => isAdminRole && isOwner(record);
+  // =====================================================
+
   const getLoggedInDisplayName = useCallback(
-    () =>
-      loggedInUser?.fullName ||
-      loggedInUser?.name ||
-      loggedInUser?.username ||
-      "",
+    () => loggedInUser?.name || loggedInUser?.username || "",
     [loggedInUser]
   );
 
@@ -303,33 +305,23 @@ const EstimationRequest = () => {
   const showSnackbar = (msg, severity = "success") =>
     setSnackbar({ open: true, message: msg, severity });
 
-  /* ---------------- Fetch users ---------------- */
+  /* ---------------- Fetch users (for Assigned To dropdown) ---------------- */
   const fetchUsers = useCallback(async () => {
+    if (!isAdminRole) {
+      setUsers([]);
+      return;
+    }
     try {
       const res = await axios.get(USERS_URL, {
         headers: { Authorization: `Bearer ${token}` },
       });
-
-      let userList = [];
-      if (res.data?.data && Array.isArray(res.data.data)) {
-        userList = res.data.data;
-      } else if (res.data?.users && Array.isArray(res.data.users)) {
-        userList = res.data.users;
-      } else if (Array.isArray(res.data)) {
-        userList = res.data;
-      } else if (res.data && typeof res.data === "object") {
-        const foundArray = Object.values(res.data).find((v) =>
-          Array.isArray(v)
-        );
-        if (foundArray) userList = foundArray;
-      }
-
-      setUsers(userList.filter((u) => u && u.username));
+      const list = Array.isArray(res.data?.data) ? res.data.data : [];
+      setUsers(list.filter((u) => u && u.username));
     } catch (err) {
       console.error("Failed to fetch users:", err);
       setUsers([]);
     }
-  }, [token]);
+  }, [token, isAdminRole]);
 
   /* ---------------- Fetch requests ---------------- */
   const fetchRequests = useCallback(async () => {
@@ -387,10 +379,8 @@ const EstimationRequest = () => {
         applicantName: newRequest.applicantName,
         propertyOwner: newRequest.propertyOwner,
         propertyAddress: newRequest.propertyAddress,
-        purposeOfValuation:
-          newRequest.purposeOfValuation || "not described",
+        purposeOfValuation: newRequest.purposeOfValuation || "not described",
         typeOfProperty: newRequest.typeOfProperty || "not described",
-        assignedBy: getLoggedInDisplayName(),
         assignedTo: newRequest.assignedTo || "",
         status: editId ? newRequest.status : "In Progress",
       };
@@ -429,6 +419,10 @@ const EstimationRequest = () => {
 
   /* ---------------- Status update ---------------- */
   const handleStatusUpdateClick = (record) => {
+    if (!canChangeStatus(record)) {
+      showSnackbar("You cannot change the status of this request", "warning");
+      return;
+    }
     setStatusUpdateRecord(record);
     setNewStatusValue(record.status || "In Progress");
     setStatusUpdateDialogOpen(true);
@@ -474,6 +468,10 @@ const EstimationRequest = () => {
 
   /* ---------------- Delete ---------------- */
   const handleDeleteClick = (record) => {
+    if (!canDelete(record)) {
+      showSnackbar("You cannot delete this request", "warning");
+      return;
+    }
     setSelectedRecord(record);
     setDeleteDialogOpen(true);
   };
@@ -551,6 +549,10 @@ const EstimationRequest = () => {
   const getStatusColor = (status) => STATUS_COLORS[status] || "default";
 
   const handleEditRequest = (request) => {
+    if (!canEdit(request)) {
+      showSnackbar("You cannot edit this request", "warning");
+      return;
+    }
     const formattedRequest = {
       ...request,
       requestDate: request.requestDate
@@ -563,6 +565,10 @@ const EstimationRequest = () => {
   };
 
   const handleCreateRequest = () => {
+    if (!canCreate) {
+      showSnackbar("You are not allowed to create estimation requests", "warning");
+      return;
+    }
     setEditId(null);
     setNewRequest({
       ...EMPTY_REQUEST,
@@ -573,50 +579,61 @@ const EstimationRequest = () => {
 
   const getUserFullName = (user) => {
     if (!user) return "";
-    return user.fullName || user.name || user.username || user.email || "";
+    return user.name || user.username || "";
   };
 
   const getAssignedToDisplay = (assignedTo) => {
     if (!assignedTo) return "Unassigned";
-
     const user = users.find(
       (u) => u.username === assignedTo || u._id === assignedTo
     );
-
     return user ? getUserFullName(user) || user.username : assignedTo;
   };
 
   /* ---------------- Status chip ---------------- */
   const renderStatusChip = (record) => {
     const status = record.status || "In Progress";
+    const allowed = canChangeStatus(record);
+
     return (
-      <Chip
-        label={status}
-        color={getStatusColor(status)}
-        size="small"
-        sx={{
-          fontWeight: "bold",
-          cursor: "pointer",
-          "&:hover": {
-            opacity: 0.8,
-            transform: "scale(1.05)",
-            transition: "all 0.2s",
-          },
-        }}
-        onClick={(e) => {
-          e.stopPropagation();
-          handleStatusUpdateClick(record);
-        }}
-        icon={
-          status === "Completed" ? (
-            <CheckCircleIcon />
-          ) : status === "Rejected" || status === "Cancelled" ? (
-            <CancelIcon />
-          ) : (
-            <PendingIcon />
-          )
-        }
-      />
+      <Tooltip
+        title={allowed ? "Click to update status" : "Not allowed to change status"}
+      >
+        <Chip
+          label={status}
+          color={getStatusColor(status)}
+          size="small"
+          sx={{
+            fontWeight: "bold",
+            cursor: allowed ? "pointer" : "default",
+            opacity: allowed ? 1 : 0.75,
+            "&:hover": allowed
+              ? {
+                  opacity: 0.8,
+                  transform: "scale(1.05)",
+                  transition: "all 0.2s",
+                }
+              : {},
+          }}
+          onClick={
+            allowed
+              ? (e) => {
+                  e.stopPropagation();
+                  handleStatusUpdateClick(record);
+                }
+              : undefined
+          }
+          icon={
+            status === "Completed" ? (
+              <CheckCircleIcon />
+            ) : status === "Rejected" || status === "Cancelled" ? (
+              <CancelIcon />
+            ) : (
+              <PendingIcon />
+            )
+          }
+        />
+      </Tooltip>
     );
   };
 
@@ -653,14 +670,16 @@ const EstimationRequest = () => {
             alignItems="center"
             sx={{ flexGrow: 1, flexWrap: "wrap" }}
           >
-            <Button
-              variant="contained"
-              startIcon={<AddIcon />}
-              sx={lightStyles.actionBtn}
-              onClick={handleCreateRequest}
-            >
-              New Request
-            </Button>
+            {canCreate && (
+              <Button
+                variant="contained"
+                startIcon={<AddIcon />}
+                sx={lightStyles.actionBtn}
+                onClick={handleCreateRequest}
+              >
+                New Request
+              </Button>
+            )}
 
             <TextField
               placeholder="🔍 Universal search..."
@@ -680,10 +699,7 @@ const EstimationRequest = () => {
                 ),
                 endAdornment: searchTerm && (
                   <InputAdornment position="end">
-                    <IconButton
-                      size="small"
-                      onClick={() => setSearchTerm("")}
-                    >
+                    <IconButton size="small" onClick={() => setSearchTerm("")}>
                       <CloseIcon fontSize="small" />
                     </IconButton>
                   </InputAdornment>
@@ -705,7 +721,6 @@ const EstimationRequest = () => {
               <RefreshIcon fontSize="small" />
             </IconButton>
 
-            {/* Status filter — icon inside the value */}
             <FormControl
               size="small"
               sx={{ minWidth: isMobile ? "100%" : "180px" }}
@@ -727,10 +742,7 @@ const EstimationRequest = () => {
               >
                 <MenuItem value="All Statuses">
                   <Stack direction="row" spacing={1} alignItems="center">
-                    <FilterListIcon
-                      fontSize="small"
-                      sx={{ color: "#FFD600" }}
-                    />
+                    <FilterListIcon fontSize="small" sx={{ color: "#FFD600" }} />
                     <Typography>All Statuses</Typography>
                   </Stack>
                 </MenuItem>
@@ -747,21 +759,62 @@ const EstimationRequest = () => {
           </Stack>
 
           <Stack direction="row" spacing={1} alignItems="center">
-            <Typography
-              variant="caption"
-              sx={{
-                color: "#000000",
-                fontWeight: "bold",
-                border: "1px solid #e0e0e0",
-                px: 1.5,
-                py: 0.5,
-                borderRadius: "4px",
-                bgcolor: "rgba(255,214,0,0.05)",
-              }}
-            >
-              {filteredRequests.length} records
-            </Typography>
-          </Stack>
+  {isAdminRole && (
+    <Chip
+      label="Your own requests"
+      size="small"
+      sx={{
+        height: 40,                    // match TextField/Select size="small"
+        bgcolor: "rgba(255,214,0,0.15)",
+        fontWeight: 600,
+        color: "#7a5c00",
+        "& .MuiChip-label": { px: 1.5 },
+      }}
+    />
+  )}
+  {isUser && (
+    <Chip
+      label="Assigned to you"
+      size="small"
+      sx={{
+        height: 40,
+        bgcolor: "rgba(255,214,0,0.15)",
+        fontWeight: 600,
+        color: "#7a5c00",
+        "& .MuiChip-label": { px: 1.5 },
+      }}
+    />
+  )}
+  {isViewOnly && (
+    <Chip
+      label="Read-only · all requests"
+      size="small"
+      sx={{
+        height: 40,
+        bgcolor: "rgba(33,150,243,0.12)",
+        fontWeight: 600,
+        color: "#0d47a1",
+        "& .MuiChip-label": { px: 1.5 },
+      }}
+    />
+  )}
+  <Typography
+    variant="caption"
+    sx={{
+      color: "#000000",
+      fontWeight: "bold",
+      border: "1px solid #e0e0e0",
+      px: 1.5,
+      borderRadius: "4px",
+      bgcolor: "rgba(255,214,0,0.05)",
+      height: 40,
+      display: "inline-flex",
+      alignItems: "center",
+    }}
+  >
+    {filteredRequests.length} records
+  </Typography>
+</Stack>
         </Paper>
 
         {/* --- DATA TABLE --- */}
@@ -844,13 +897,13 @@ const EstimationRequest = () => {
                           cursor: "pointer",
                           backgroundColor:
                             selectedRowId === r._id
-                              ? "#a5d6a7f3"          // selected — soft green
+                              ? "#a5d6a7f3"
                               : "transparent",
                           "&:hover": {
                             bgcolor:
                               selectedRowId === r._id
-                                ? "#66bb6a"          // selected + hover — deeper green
-                                : "rgba(76, 175, 80, 0.12)", // unselected hover — faint green
+                                ? "#66bb6a"
+                                : "rgba(76, 175, 80, 0.12)",
                           },
                           transition: "background-color 0.2s ease",
                         }}
@@ -870,15 +923,8 @@ const EstimationRequest = () => {
                         </TableCell>
 
                         <TableCell sx={lightStyles.tableCell}>
-                          <Stack
-                            direction="row"
-                            spacing={0.5}
-                            alignItems="center"
-                          >
-                            <PersonIcon
-                              fontSize="small"
-                              sx={{ color: "#FFD600" }}
-                            />
+                          <Stack direction="row" spacing={0.5} alignItems="center">
+                            <PersonIcon fontSize="small" sx={{ color: "#FFD600" }} />
                             <Typography variant="body2">
                               {r.requestingOrgan || "—"}
                             </Typography>
@@ -892,15 +938,8 @@ const EstimationRequest = () => {
                         </TableCell>
 
                         <TableCell sx={lightStyles.tableCell}>
-                          <Stack
-                            direction="row"
-                            spacing={0.5}
-                            alignItems="center"
-                          >
-                            <PersonIcon
-                              fontSize="small"
-                              sx={{ color: "#FFD600" }}
-                            />
+                          <Stack direction="row" spacing={0.5} alignItems="center">
+                            <PersonIcon fontSize="small" sx={{ color: "#FFD600" }} />
                             <Typography variant="body2">
                               {r.applicantName || "—"}
                             </Typography>
@@ -908,15 +947,8 @@ const EstimationRequest = () => {
                         </TableCell>
 
                         <TableCell sx={lightStyles.tableCell}>
-                          <Stack
-                            direction="row"
-                            spacing={0.5}
-                            alignItems="center"
-                          >
-                            <PersonIcon
-                              fontSize="small"
-                              sx={{ color: "#FFD600" }}
-                            />
+                          <Stack direction="row" spacing={0.5} alignItems="center">
+                            <PersonIcon fontSize="small" sx={{ color: "#FFD600" }} />
                             <Typography variant="body2">
                               {r.propertyOwner || "—"}
                             </Typography>
@@ -925,15 +957,8 @@ const EstimationRequest = () => {
 
                         <TableCell sx={lightStyles.tableCell}>
                           <Tooltip title={r.propertyAddress || "—"}>
-                            <Stack
-                              direction="row"
-                              spacing={0.5}
-                              alignItems="center"
-                            >
-                              <PlaceIcon
-                                fontSize="small"
-                                sx={{ color: "#FFD600" }}
-                              />
+                            <Stack direction="row" spacing={0.5} alignItems="center">
+                              <PlaceIcon fontSize="small" sx={{ color: "#FFD600" }} />
                               <Typography
                                 variant="body2"
                                 sx={{
@@ -950,18 +975,9 @@ const EstimationRequest = () => {
                         </TableCell>
 
                         <TableCell sx={lightStyles.tableCell}>
-                          <Tooltip
-                            title={r.purposeOfValuation || "Not described"}
-                          >
-                            <Stack
-                              direction="row"
-                              spacing={0.5}
-                              alignItems="center"
-                            >
-                              <GavelIcon
-                                fontSize="small"
-                                sx={{ color: "#FFD600" }}
-                              />
+                          <Tooltip title={r.purposeOfValuation || "Not described"}>
+                            <Stack direction="row" spacing={0.5} alignItems="center">
+                              <GavelIcon fontSize="small" sx={{ color: "#FFD600" }} />
                               <Typography
                                 variant="body2"
                                 sx={{
@@ -978,14 +994,8 @@ const EstimationRequest = () => {
                         </TableCell>
 
                         <TableCell sx={lightStyles.tableCell}>
-                          <Tooltip
-                            title={r.typeOfProperty || "Not described"}
-                          >
-                            <Stack
-                              direction="row"
-                              spacing={0.5}
-                              alignItems="center"
-                            >
+                          <Tooltip title={r.typeOfProperty || "Not described"}>
+                            <Stack direction="row" spacing={0.5} alignItems="center">
                               <ApartmentIcon
                                 fontSize="small"
                                 sx={{ color: "#FFD600" }}
@@ -1017,11 +1027,7 @@ const EstimationRequest = () => {
                                 : "Unassigned"
                             }
                           >
-                            <Stack
-                              direction="row"
-                              spacing={0.5}
-                              alignItems="center"
-                            >
+                            <Stack direction="row" spacing={0.5} alignItems="center">
                               <EngineeringIcon
                                 fontSize="small"
                                 sx={{ color: "#FFD600" }}
@@ -1038,38 +1044,47 @@ const EstimationRequest = () => {
                         </TableCell>
 
                         <TableCell sx={lightStyles.tableCell}>
-                          <IconButton
-                            size="small"
-                            sx={{
-                              color: "#000000",
-                              "&:hover": {
-                                bgcolor: "#FFD600",
+                          {canEdit(r) && (
+                            <IconButton
+                              size="small"
+                              sx={{
                                 color: "#000000",
-                              },
-                            }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleEditRequest(r);
-                            }}
-                          >
-                            <EditIcon fontSize="small" />
-                          </IconButton>
-                          <IconButton
-                            size="small"
-                            sx={{
-                              color: "#ff4444",
-                              "&:hover": {
-                                bgcolor: "#ff0000",
-                                color: "#ffffff",
-                              },
-                            }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDeleteClick(r);
-                            }}
-                          >
-                            <DeleteIcon fontSize="small" />
-                          </IconButton>
+                                "&:hover": {
+                                  bgcolor: "#FFD600",
+                                  color: "#000000",
+                                },
+                              }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleEditRequest(r);
+                              }}
+                            >
+                              <EditIcon fontSize="small" />
+                            </IconButton>
+                          )}
+                          {canDelete(r) && (
+                            <IconButton
+                              size="small"
+                              sx={{
+                                color: "#ff4444",
+                                "&:hover": {
+                                  bgcolor: "#ff0000",
+                                  color: "#ffffff",
+                                },
+                              }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteClick(r);
+                              }}
+                            >
+                              <DeleteIcon fontSize="small" />
+                            </IconButton>
+                          )}
+                          {!canEdit(r) && !canDelete(r) && (
+                            <Typography variant="caption" color="text.secondary">
+                              —
+                            </Typography>
+                          )}
                         </TableCell>
                       </TableRow>
                     ))
@@ -1281,10 +1296,7 @@ const EstimationRequest = () => {
                 {PURPOSE_OPTIONS.map((option) => (
                   <MenuItem key={option} value={option}>
                     <Stack direction="row" spacing={1} alignItems="center">
-                      <GavelIcon
-                        fontSize="small"
-                        sx={{ color: "#FFD600" }}
-                      />
+                      <GavelIcon fontSize="small" sx={{ color: "#FFD600" }} />
                       <Typography>{option}</Typography>
                     </Stack>
                   </MenuItem>
@@ -1351,7 +1363,11 @@ const EstimationRequest = () => {
                   backgroundColor: "#f5f5f5",
                 },
               }}
-              value={getLoggedInDisplayName()}
+              value={
+                editId
+                  ? newRequest.assignedBy || getLoggedInDisplayName()
+                  : getLoggedInDisplayName()
+              }
               disabled
               InputProps={{
                 startAdornment: (
@@ -1540,16 +1556,14 @@ const EstimationRequest = () => {
                   color="text.secondary"
                   display="block"
                 >
-                  Estimation ID:{" "}
-                  <strong>{statusUpdateRecord.estimationId}</strong>
+                  Estimation ID: <strong>{statusUpdateRecord.estimationId}</strong>
                 </Typography>
                 <Typography
                   variant="caption"
                   color="text.secondary"
                   display="block"
                 >
-                  Applicant:{" "}
-                  <strong>{statusUpdateRecord.applicantName}</strong>
+                  Applicant: <strong>{statusUpdateRecord.applicantName}</strong>
                 </Typography>
                 <Typography
                   variant="caption"
@@ -1590,11 +1604,7 @@ const EstimationRequest = () => {
               >
                 {STATUS_OPTIONS.map((status) => (
                   <MenuItem key={status} value={status}>
-                    <Stack
-                      direction="row"
-                      spacing={1}
-                      alignItems="center"
-                    >
+                    <Stack direction="row" spacing={1} alignItems="center">
                       {statusIcon(status, 18)}
                       <Typography>{status}</Typography>
                     </Stack>
@@ -1617,9 +1627,7 @@ const EstimationRequest = () => {
             <Button
               onClick={handleConfirmStatusUpdate}
               variant="contained"
-              disabled={
-                loading || newStatusValue === statusUpdateRecord?.status
-              }
+              disabled={loading || newStatusValue === statusUpdateRecord?.status}
               sx={{
                 bgcolor: "#FFD600",
                 color: "#000000",
@@ -1676,8 +1684,7 @@ const EstimationRequest = () => {
                   color="text.secondary"
                   display="block"
                 >
-                  Estimation ID:{" "}
-                  <strong>{selectedRecord.estimationId}</strong>
+                  Estimation ID: <strong>{selectedRecord.estimationId}</strong>
                 </Typography>
                 <Typography
                   variant="caption"

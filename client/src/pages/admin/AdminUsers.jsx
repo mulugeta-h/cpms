@@ -20,7 +20,6 @@ import {
   Tooltip,
   IconButton,
   Avatar,
-  Stack,
   TablePagination,
 } from "@mui/material";
 import {
@@ -28,13 +27,19 @@ import {
   Refresh as RefreshIcon,
   CheckCircle as CheckCircleIcon,
   Cancel as CancelIcon,
-  AdminPanelSettings as AdminIcon,
-  Security as SecurityIcon,
-  Person as UserIcon,
 } from "@mui/icons-material";
 import axios from "axios";
 
 const API_URL = `${import.meta.env.VITE_API_URL}/api/super-admin`;
+
+const ROLE_LABEL = {
+  SUPER_ADMIN: "SUPER ADMIN",
+  ALL_ADMIN: "ALL ADMIN",
+  ALL_VIEW: "ALL VIEW",
+  EST_ADMIN: "EST ADMIN",
+  DC_ADMIN: "DC ADMIN",
+  USER: "USER",
+};
 
 const AdminManagement = () => {
   const [users, setUsers] = useState([]);
@@ -48,33 +53,19 @@ const AdminManagement = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
 
-  const getContainerMargin = () => {
-    if (isMobile) return "0px";
-    return "4px";
-  };
+  const getContainerMargin = () => (isMobile ? "0px" : "4px");
+  const getContainerWidth = () => (isMobile ? "100%" : "calc(100% - 4px)");
 
-  const getContainerWidth = () => {
-    if (isMobile) return "100%";
-    return "calc(100% - 4px)";
-  };
-
-  // Check if user is SUPER_ADMIN
-  const isSuperAdmin = (user) => {
-    return user?.role === "SUPER_ADMIN";
-  };
-
-  // Fetch all users
   const fetchUsers = async () => {
     try {
       setLoading(true);
       setError(null);
       const token = localStorage.getItem("token");
-      
-      const response = await axios.get(
-        `${API_URL}/users`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      
+
+      const response = await axios.get(`${API_URL}/users`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
       const userData = response.data.data || [];
       setUsers(userData);
       setTotalUsers(userData.length);
@@ -90,8 +81,7 @@ const AdminManagement = () => {
     fetchUsers();
   }, []);
 
-  // Handle search
-  const filteredUsers = users.filter(user => {
+  const filteredUsers = users.filter((user) => {
     if (!searchTerm) return true;
     const search = searchTerm.toLowerCase();
     return (
@@ -101,56 +91,33 @@ const AdminManagement = () => {
     );
   });
 
-  // Handle pagination
-  const handleChangePage = (event, newPage) => {
-    setPage(newPage);
-  };
-
+  const handleChangePage = (event, newPage) => setPage(newPage);
   const handleChangeRowsPerPage = (event) => {
     setRowsPerPage(parseInt(event.target.value, 10));
     setPage(0);
   };
 
-  // Get role chip
-  const getRoleChip = (role) => {
-    if (role === "SUPER_ADMIN") {
-      return (
-        <Chip 
-          label="SUPER ADMIN" 
-          color="error" 
-          size="small" 
-          icon={<SecurityIcon />}
-          sx={{ fontWeight: 'bold' }}
-        />
-      );
-    }
-    if (role === "ADMIN") {
-      return (
-        <Chip 
-          label="ADMIN" 
-          color="primary" 
-          size="small" 
-          icon={<AdminIcon />}
-        />
-      );
-    }
-    return (
-      <Chip 
-        label="USER" 
-        color="default" 
-        size="small" 
-        icon={<UserIcon />}
-      />
-    );
-  };
+  // Neutral role chip — no color, just a label
+  const getRoleChip = (role) => (
+    <Chip
+      label={ROLE_LABEL[role] || role || "USER"}
+      size="small"
+      variant="outlined"
+      sx={{
+        borderColor: "#bdbdbd",
+        color: "#424242",
+        fontWeight: role === "SUPER_ADMIN" ? "bold" : "normal",
+      }}
+    />
+  );
 
-  // Get status chip
-  const getStatusChip = (enabled) => {
-    if (enabled) {
-      return <Chip label="Active" color="success" size="small" icon={<CheckCircleIcon />} />;
-    }
-    return <Chip label="Disabled" color="error" size="small" icon={<CancelIcon />} />;
-  };
+  // The only colored element on the row
+  const getStatusChip = (enabled) =>
+    enabled ? (
+      <Chip label="Active" color="success" size="small" icon={<CheckCircleIcon />} />
+    ) : (
+      <Chip label="Disabled" color="error" size="small" icon={<CancelIcon />} />
+    );
 
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "#f5f5f5", py: isMobile ? 1 : 2 }}>
@@ -164,28 +131,30 @@ const AdminManagement = () => {
         }}
       >
         {/* Header */}
-        <Box sx={{ 
-          display: 'flex', 
-          justifyContent: 'space-between', 
-          alignItems: 'center', 
-          mb: 3, 
-          flexWrap: 'wrap', 
-          gap: 2,
-          bgcolor: '#fff',
-          p: 2,
-          borderRadius: 2,
-          boxShadow: 1,
-        }}>
+        <Box
+          sx={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            mb: 3,
+            flexWrap: "wrap",
+            gap: 2,
+            bgcolor: "#fff",
+            p: 2,
+            borderRadius: 2,
+            boxShadow: 1,
+          }}
+        >
           <Typography
             variant={isMobile ? "h6" : "h5"}
             fontWeight="bold"
             color="#DAA520"
-            sx={{ whiteSpace: 'nowrap' }}
+            sx={{ whiteSpace: "nowrap" }}
           >
             User Management
           </Typography>
-          
-          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
+
+          <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap", alignItems: "center" }}>
             <TextField
               size="small"
               placeholder="Search..."
@@ -203,11 +172,11 @@ const AdminManagement = () => {
               }}
               sx={{ width: isMobile ? 150 : 200 }}
             />
-            
-            <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
+
+            <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: "nowrap" }}>
               Total: {totalUsers}
             </Typography>
-            
+
             <Tooltip title="Refresh">
               <IconButton
                 size="small"
@@ -223,62 +192,61 @@ const AdminManagement = () => {
 
         {/* Users Table */}
         {loading ? (
-          <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
+          <Box sx={{ display: "flex", justifyContent: "center", py: 8 }}>
             <CircularProgress sx={{ color: "#DAA520" }} />
           </Box>
         ) : error ? (
-          <Paper sx={{ p: 4, textAlign: 'center', borderRadius: 2 }}>
+          <Paper sx={{ p: 4, textAlign: "center", borderRadius: 2 }}>
             <Typography color="error">{error}</Typography>
-            <Button onClick={fetchUsers} sx={{ mt: 2 }}>Retry</Button>
+            <Button onClick={fetchUsers} sx={{ mt: 2 }}>
+              Retry
+            </Button>
           </Paper>
         ) : users.length === 0 ? (
-          <Paper sx={{ p: 8, textAlign: 'center', borderRadius: 2 }}>
+          <Paper sx={{ p: 8, textAlign: "center", borderRadius: 2 }}>
             <Typography variant="h6" color="text.secondary">
               No users found
             </Typography>
           </Paper>
         ) : (
           <>
-            <TableContainer 
-              component={Paper} 
-              sx={{ 
-                borderRadius: 2, 
-                overflow: 'auto',
-                maxHeight: '500px',
-              }}
+            <TableContainer
+              component={Paper}
+              sx={{ borderRadius: 2, overflow: "auto", maxHeight: "500px" }}
             >
               <Table stickyHeader>
                 <TableHead>
                   <TableRow sx={{ bgcolor: "#f5f5f5" }}>
-                    <TableCell sx={{ fontWeight: "bold", minWidth: 60 }}>ID</TableCell>
+                    <TableCell sx={{ fontWeight: "bold", minWidth: 80 }}>RNO/#</TableCell>
                     <TableCell sx={{ fontWeight: "bold", minWidth: 120 }}>Username</TableCell>
                     <TableCell sx={{ fontWeight: "bold", minWidth: 150 }}>Full Name</TableCell>
                     <TableCell sx={{ fontWeight: "bold", minWidth: 130 }}>Role</TableCell>
-                    <TableCell sx={{ fontWeight: "bold", minWidth: 100 }}>Status</TableCell>
-                    <TableCell sx={{ fontWeight: "bold", minWidth: 150 }}>Created At</TableCell>
+                    <TableCell sx={{ fontWeight: "bold", minWidth: 110 }}>Status</TableCell>
+                    <TableCell sx={{ fontWeight: "bold", minWidth: 130 }}>Created At</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
                   {filteredUsers
                     .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
-                    .map((user) => {
-                      const isSuper = isSuperAdmin(user);
+                    .map((user, index) => {
+                      const rowNumber = page * rowsPerPage + index + 1;
+
                       return (
-                        <TableRow 
+                        <TableRow
                           key={user._id}
-                          sx={{ 
-                            '&:hover': { bgcolor: '#fafafa' },
-                            bgcolor: isSuper ? '#fff3e0' : (user.enabled ? 'inherit' : '#fff5f5')
-                          }}
+                          sx={{ "&:hover": { bgcolor: "#fafafa" } }}
                         >
-                          <TableCell>{user._id}</TableCell>
+                          <TableCell>{rowNumber}</TableCell>
                           <TableCell>
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                              <Avatar sx={{ 
-                                width: 28, 
-                                height: 28, 
-                                bgcolor: isSuper ? '#f44336' : (user.role === 'ADMIN' ? '#1976d2' : '#757575')
-                              }}>
+                            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                              <Avatar
+                                sx={{
+                                  width: 28,
+                                  height: 28,
+                                  bgcolor: "#9e9e9e",
+                                  fontSize: 13,
+                                }}
+                              >
                                 {user.username?.charAt(0).toUpperCase()}
                               </Avatar>
                               <Typography variant="body2">{user.username}</Typography>
@@ -288,7 +256,9 @@ const AdminManagement = () => {
                           <TableCell>{getRoleChip(user.role)}</TableCell>
                           <TableCell>{getStatusChip(user.enabled)}</TableCell>
                           <TableCell>
-                            {user.createdAt ? new Date(user.createdAt).toLocaleDateString() : "—"}
+                            {user.createdAt
+                              ? new Date(user.createdAt).toLocaleDateString()
+                              : "—"}
                           </TableCell>
                         </TableRow>
                       );
@@ -306,9 +276,9 @@ const AdminManagement = () => {
               onPageChange={handleChangePage}
               onRowsPerPageChange={handleChangeRowsPerPage}
               sx={{
-                borderTop: '1px solid #e0e0e0',
-                '& .MuiTablePagination-selectIcon': { color: '#DAA520' },
-                '& .MuiIconButton-root': { color: '#DAA520' },
+                borderTop: "1px solid #e0e0e0",
+                "& .MuiTablePagination-selectIcon": { color: "#DAA520" },
+                "& .MuiIconButton-root": { color: "#DAA520" },
               }}
             />
           </>

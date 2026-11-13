@@ -56,12 +56,20 @@ const login = async (req, res) => {
       });
     }
 
-    // Check password
+    // Check password FIRST — so a disabled account can't be
+    // detected by someone who doesn't know the password.
     const isMatch = await user.matchPassword(password);
 
     if (!isMatch) {
       return res.status(400).json({
         msg: "Wrong password",
+      });
+    }
+
+    // ⛔ Account disabled check — AFTER password verification
+    if (!user.enabled) {
+      return res.status(403).json({
+        msg: "Your account has been disabled. Please contact an administrator.",
       });
     }
 

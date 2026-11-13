@@ -37,6 +37,7 @@ import {
   InputLabel,
   Select,
   MenuItem,
+  Chip,
 } from "@mui/material";
 import {
   Refresh as RefreshIcon,
@@ -49,9 +50,13 @@ import {
   Place as PlaceIcon,
   Public as PublicIcon,
   ContentCopy as ContentCopyIcon,
+  CheckCircle as CheckCircleIcon,
+  Cancel as CancelIcon,
+  Pending as PendingIcon,
 } from "@mui/icons-material";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
+import { jwtDecode } from "jwt-decode";
 
 import { parseCoordinate, openLocationOnMap } from "../../utils/location";
 
@@ -60,6 +65,12 @@ const INPROGRESS_IDS_URL = `${API_URL}/inprogress-estimation-ids`;
 
 const STATUS_OPTIONS = ["In Progress", "Completed", "Rejected"];
 const DOC_OPTIONS = ["Pending", "Completed"];
+
+const STATUS_COLORS = {
+  "In Progress": "info",
+  Completed: "success",
+  Rejected: "error",
+};
 
 /* ---------------- Pure helpers (hoisted) ---------------- */
 
@@ -98,7 +109,20 @@ const makeEmptyEstimation = () => ({
   areaOfSite: "",
   estimationNumber: "",
   remark: "",
+  status: "In Progress",
 });
+
+const statusIcon = (status, fontSize = 18) => {
+  switch (status) {
+    case "Completed":
+      return <CheckCircleIcon sx={{ fontSize, color: "#4caf50" }} />;
+    case "Rejected":
+      return <CancelIcon sx={{ fontSize, color: "#f44336" }} />;
+    case "In Progress":
+    default:
+      return <PendingIcon sx={{ fontSize, color: "#2196f3" }} />;
+  }
+};
 
 /* ---------------- Shared styles ---------------- */
 
@@ -314,6 +338,32 @@ const Estimation = () => {
   const token = localStorage.getItem("token");
   const navigate = useNavigate();
 
+  /* ---------------- Role / identity ---------------- */
+  const loggedInUser = useMemo(() => {
+    try {
+      if (!token) return null;
+      const d = jwtDecode(token);
+      const u = d.user || d;
+      return {
+        username: u.username || u.name || "",
+        role: String(u.role || u.userRole || "").toUpperCase(),
+      };
+    } catch {
+      return null;
+    }
+  }, [token]);
+
+  const role = loggedInUser?.role || "";
+  const myUsername = loggedInUser?.username || "";
+
+  const canCreate = role === "USER";
+  const canEdit   = role === "USER";
+  const canDelete = role === "EST_ADMIN" || role === "ALL_ADMIN";
+
+  // Admins can only delete their own created rows.
+  const canDeleteRow = (row) =>
+    canDelete && row?.createdBy && row.createdBy === myUsername;
+
   /* ---------------- State ---------------- */
   const [estimations, setEstimations] = useState([]);
   const [estIdOptions, setEstIdOptions] = useState([]);
@@ -321,6 +371,7 @@ const Estimation = () => {
   const [statusFilter, setStatusFilter] = useState("All Statuses");
   const [newEstimation, setNewEstimation] = useState(makeEmptyEstimation);
   const [editId, setEditId] = useState(null);
+  const [editingStatus, setEditingStatus] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [loading, setLoading] = useState(false);
   const [snackbar, setSnackbar] = useState({
@@ -396,7 +447,7 @@ const Estimation = () => {
     }
   }, [token, navigate]);
 
-  /* ---------------- Fetch estimations (all, once) ---------------- */
+  /* ---------------- Fetch estimations ---------------- */
   const fetchEstimations = useCallback(async () => {
     if (estAbortRef.current) estAbortRef.current.abort();
     const controller = new AbortController();
@@ -465,7 +516,12 @@ const Estimation = () => {
         remark: newEstimation.remark || "",
       };
 
-      // estimationId is immutable on update
+      if (!editId) {
+        payload.status = "In Progress";
+      } else if (editingStatus === "In Progress") {
+        payload.status = newEstimation.status || "In Progress";
+      }
+
       if (!editId) payload.estimationId = newEstimation.estimationId;
 
       const response = editId
@@ -484,6 +540,7 @@ const Estimation = () => {
       );
       setFormOpen(false);
       setEditId(null);
+      setEditingStatus(null);
       setNewEstimation(makeEmptyEstimation());
       fetchEstimations();
       fetchEstIds();
@@ -496,6 +553,12 @@ const Estimation = () => {
 
   /* ---------------- Delete ---------------- */
   const handleDeleteClick = (record) => {
+    if (!canDeleteRow(record)) {
+      return showSnackbar(
+        "You can only delete estimations you created",
+        "warning"
+      );
+    }
     setSelectedRecord(record);
     setDeleteDialogOpen(true);
   };
@@ -524,7 +587,7 @@ const Estimation = () => {
     }
   };
 
-  /* ---------------- Filtering + pagination (client-side) ------------ */
+  /* ---------------- Filtering + pagination ---------------- */
   const filteredEstimations = useMemo(() => {
     let filtered = estimations;
 
@@ -569,7 +632,14 @@ const Estimation = () => {
   };
 
   const handleEditEstimation = (row) => {
+    if (!canEdit) {
+      return showSnackbar(
+        "Your role is not allowed to edit estimations",
+        "warning"
+      );
+    }
     setEditId(row._id);
+    setEditingStatus(row.status || "In Progress");
     setNewEstimation({
       estimationId: row.estimationId || "",
       numberOfProperties: row.numberOfProperties ?? 1,
@@ -581,14 +651,40 @@ const Estimation = () => {
       areaOfSite: row.areaOfSite ?? "",
       estimationNumber: row.estimationNumber || "",
       remark: row.remark || "",
+      status: row.status || "In Progress",
     });
     setFormOpen(true);
   };
 
   const handleCreateEstimation = () => {
+    if (!canCreate) {
+      return showSnackbar(
+        "Your role is not allowed to create estimations",
+        "warning"
+      );
+    }
     setEditId(null);
+    setEditingStatus(null);
     setNewEstimation(makeEmptyEstimation());
     setFormOpen(true);
+  };
+
+  /* ---------------- Status editability ---------------- */
+  const isStatusEditable = !editId || editingStatus === "In Progress";
+  const isStatusLocked = !!editId && !isStatusEditable;
+
+  /* ---------------- Status chip ---------------- */
+  const renderStatusChip = (record) => {
+    const status = record.status || "In Progress";
+    return (
+      <Chip
+        label={status}
+        color={STATUS_COLORS[status] || "default"}
+        size="small"
+        sx={{ fontWeight: "bold" }}
+        icon={statusIcon(status, 16)}
+      />
+    );
   };
 
   /* ============================================================
@@ -624,14 +720,16 @@ const Estimation = () => {
             alignItems="center"
             sx={{ flexGrow: 1, flexWrap: "wrap" }}
           >
-            <Button
-              variant="contained"
-              startIcon={<AddIcon />}
-              sx={lightStyles.actionBtn}
-              onClick={handleCreateEstimation}
-            >
-              New Estimation
-            </Button>
+            {canCreate && (
+              <Button
+                variant="contained"
+                startIcon={<AddIcon />}
+                sx={lightStyles.actionBtn}
+                onClick={handleCreateEstimation}
+              >
+                New Estimation
+              </Button>
+            )}
 
             <TextField
               placeholder="🔍 Universal search..."
@@ -764,6 +862,7 @@ const Estimation = () => {
                       "Location",
                       "Area (sq.m)",
                       "Estimation Number",
+                      "Assigned By",
                       "Assigned Engineer",
                       "Remark",
                       "Status",
@@ -780,7 +879,7 @@ const Estimation = () => {
                   {paginatedEstimations.length === 0 ? (
                     <TableRow>
                       <TableCell
-                        colSpan={18}
+                        colSpan={19}
                         sx={{ textAlign: "center", py: 4, color: "#666" }}
                       >
                         No estimations found
@@ -870,7 +969,6 @@ const Estimation = () => {
                           {r.documentation || "—"}
                         </TableCell>
 
-                        {/* Location — portable click-to-map */}
                         <TableCell sx={lightStyles.tableCell}>
                           <LocationCell
                             value={r.locationCoordinate}
@@ -884,6 +982,10 @@ const Estimation = () => {
 
                         <TableCell sx={lightStyles.tableCell}>
                           {r.estimationNumber || "—"}
+                        </TableCell>
+
+                        <TableCell sx={lightStyles.tableCell}>
+                          {r.assignedBy || "—"}
                         </TableCell>
 
                         <TableCell sx={lightStyles.tableCell}>
@@ -906,45 +1008,58 @@ const Estimation = () => {
                           </Tooltip>
                         </TableCell>
 
-                        {/* Status — display only (from EstimationRequest) */}
                         <TableCell sx={lightStyles.tableCell}>
-                          {r.status || "—"}
+                          {renderStatusChip(r)}
                         </TableCell>
 
+                        {/* Actions — role-gated */}
                         <TableCell sx={lightStyles.tableCell}>
-                          <IconButton
-                            size="small"
-                            sx={{
-                              color: "#000000",
-                              "&:hover": {
-                                bgcolor: "#FFD600",
+                          {canEdit && (
+                            <IconButton
+                              size="small"
+                              sx={{
                                 color: "#000000",
-                              },
-                            }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleEditEstimation(r);
-                            }}
-                          >
-                            <EditIcon fontSize="small" />
-                          </IconButton>
+                                "&:hover": {
+                                  bgcolor: "#FFD600",
+                                  color: "#000000",
+                                },
+                              }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleEditEstimation(r);
+                              }}
+                            >
+                              <EditIcon fontSize="small" />
+                            </IconButton>
+                          )}
 
-                          <IconButton
-                            size="small"
-                            sx={{
-                              color: "#ff4444",
-                              "&:hover": {
-                                bgcolor: "#ff0000",
-                                color: "#ffffff",
-                              },
-                            }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDeleteClick(r);
-                            }}
-                          >
-                            <DeleteIcon fontSize="small" />
-                          </IconButton>
+                          {canDeleteRow(r) && (
+                            <IconButton
+                              size="small"
+                              sx={{
+                                color: "#ff4444",
+                                "&:hover": {
+                                  bgcolor: "#ff0000",
+                                  color: "#ffffff",
+                                },
+                              }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteClick(r);
+                              }}
+                            >
+                              <DeleteIcon fontSize="small" />
+                            </IconButton>
+                          )}
+
+                          {!canEdit && !canDeleteRow(r) && (
+                            <Typography
+                              variant="caption"
+                              sx={{ color: "#999" }}
+                            >
+                              —
+                            </Typography>
+                          )}
                         </TableCell>
                       </TableRow>
                     ))
@@ -1150,7 +1265,6 @@ const Estimation = () => {
               helperText="Format: lat,lng — e.g. 9.0301,38.7400"
             />
 
-            {/* Live preview when coordinate parses */}
             {parseCoordinate(newEstimation.locationCoordinate) && (
               <Stack
                 direction="row"
@@ -1205,6 +1319,50 @@ const Estimation = () => {
               value={newEstimation.estimationNumber}
               onChange={handleEstChange}
             />
+
+            <FormControl
+              fullWidth
+              size="small"
+              sx={selectSx}
+              disabled={!isStatusEditable}
+            >
+              <InputLabel id="status-label">Status</InputLabel>
+              <Select
+                labelId="status-label"
+                label="Status"
+                name="status"
+                value={newEstimation.status || "In Progress"}
+                onChange={handleEstChange}
+                sx={selectSx}
+                renderValue={(selected) => (
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    {statusIcon(selected, 16)}
+                    <span>{selected}</span>
+                  </Stack>
+                )}
+              >
+                {STATUS_OPTIONS.map((status) => (
+                  <MenuItem key={status} value={status}>
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      {statusIcon(status, 16)}
+                      <Typography>{status}</Typography>
+                    </Stack>
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            {isStatusLocked && (
+              <Alert
+                severity={
+                  editingStatus === "Completed" ? "success" : "warning"
+                }
+                sx={{ gridColumn: { sm: "1 / -1" }, mt: -1 }}
+              >
+                This estimation is <strong>{editingStatus}</strong>. Status
+                cannot be changed.
+              </Alert>
+            )}
 
             <TextField
               fullWidth
