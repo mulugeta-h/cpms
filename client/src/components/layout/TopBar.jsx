@@ -116,7 +116,7 @@ const TopBar = ({ title, isMobile, onMenuClick, sidebarWidth = 0 }) => {
       );
     }
   } catch (err) {
-    // Don't block logout — the server will still invalidate via inactivity
+    // Don't block logout — the server will still invalidate via inactivity on server too
     console.error('Logout API failed:', err.response?.data || err.message);
   } finally {
     localStorage.removeItem('user');
