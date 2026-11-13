@@ -107,7 +107,7 @@ const getStatusColor = (status) => {
   return found ? found.color : "#757575";
 };
 
-/* ---------------- Pure helpers ---------------- */
+/* ---------------- Pure helper functions---------------- */
 const getToday = () => {
   const d = new Date();
   const offset = d.getTimezoneOffset();
