@@ -190,7 +190,7 @@ const AdminManagement = () => {
           </Box>
         </Box>
 
-        {/* Users Table */}
+        {/* Users Table design*/}
         {loading ? (
           <Box sx={{ display: "flex", justifyContent: "center", py: 8 }}>
             <CircularProgress sx={{ color: "#DAA520" }} />
