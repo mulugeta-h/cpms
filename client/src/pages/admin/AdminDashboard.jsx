@@ -72,7 +72,7 @@ const StatCard = ({ title, value, icon, color, subtitle }) => (
   </Card>
 );
 
-/* ---------- Number row ---------- */
+/* ---------- Number row design---------- */
 const NumRow = ({ label, value, color = "text.primary", bold = false }) => (
   <Stack
     direction="row"
