@@ -1,5 +1,5 @@
 export const DEFAULT_PASSWORD = "12345678";
-
+//default password
 export const PASSWORD_REQUIREMENTS =
   "At least 8 characters, one uppercase, one lowercase, one number, and one special character.";
 
