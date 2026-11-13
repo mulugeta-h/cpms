@@ -64,7 +64,7 @@ const SessionManager = ({ children }) => {
     }
   }, [user]);
 
-  // Only enable inactivity logout for authenticated users
+  // Only enable inactivity logout for authenticated users on server too 
   useInactivityLogout(Boolean(user), () => {
     clearSessionRef.current("Logged out due to 15 minutes of inactivity.");
   });
