@@ -17,7 +17,7 @@ const actorId = (req) =>
 
 // All admin roles behave identically for this module
 const isAdminRole = (req) =>
-  ["ALL_ADMIN", "EST_ADMIN", "DC_ADMIN"].includes(getRole(req));
+  ["ALL_ADMIN", "EST_ADMIN"].includes(getRole(req));
 const isViewOnly = (req) => getRole(req) === "ALL_VIEW";
 const isUserRole = (req) => getRole(req) === "USER";
 
@@ -509,9 +509,13 @@ const getEstimationStatistics = async (req, res) => {
 // =====================================================
 // GET users (Assigned To dropdown)
 // =====================================================
+
 const getUsers = async (req, res) => {
   try {
-    const users = await User.find({ role: "USER", enabled: true })
+    const users = await User.find({
+      role: { $in: ["USER", "DC_ADMIN", "EST_ADMIN", "ALL_ADMIN"] },
+      enabled: true,
+    })
       .select("name username role")
       .sort({ createdAt: -1 });
 
