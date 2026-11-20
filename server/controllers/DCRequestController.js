@@ -6,42 +6,98 @@ const Construction = require("../models/Construction");
 const User = require("../models/User");
 const mongoose = require("mongoose");
 
-const VALID_STATUSES = [
-  "Pending",
-  "In Progress",
-  "Completed",
-  "Rejected",
-  "Cancelled"
-];
+// =====================================================
+// ROLE HELPERS (EST_ADMIN removed)
+// =====================================================
+const getRole = (req) =>
+  String(req.user?.role || req.user?.userRole || "").toUpperCase();
+
+const actorName = (req) => req.user?.name || "";
+const actorUsername = (req) => req.user?.username || req.user?.name || "";
+const actorId = (req) =>
+  String(req.user?.id || req.user?._id || req.user?.sub || "");
+
+// Admin roles for this module: ALL_ADMIN and DC_ADMIN only
+const isAdminRole = (req) =>
+  ["ALL_ADMIN", "DC_ADMIN"].includes(getRole(req));
+const isViewOnly = (req) => getRole(req) === "ALL_VIEW";
+const isUserRole = (req) => getRole(req) === "USER";
+
+const isOwner = (req, doc) => {
+  const by = String(doc?.assignedBy || "").trim();
+  if (!by) return false;
+  return by === actorName(req) || by === actorUsername(req);
+};
+
+const canCreate = (req) => isAdminRole(req);
+const canManage = (req, doc) => isAdminRole(req) && isOwner(req, doc);
+
+const canReadOne = (req, doc) => {
+  if (isViewOnly(req)) return true;
+  if (isAdminRole(req)) return isOwner(req, doc);
+  if (isUserRole(req)) {
+    const to = String(doc?.assignedTo || "").trim();
+    return !!to && (to === actorUsername(req) || to === actorId(req));
+  }
+  return false;
+};
+
+const readAllScope = (req) => {
+  if (isAdminRole(req)) {
+    return {
+      scope: "own",
+      filter: {
+        $or: [{ assignedBy: actorName(req) }, { assignedBy: actorUsername(req) }],
+      },
+    };
+  }
+  if (isUserRole(req)) {
+    return {
+      scope: "assigned",
+      filter: {
+        $or: [{ assignedTo: actorUsername(req) }, { assignedTo: actorId(req) }],
+      },
+    };
+  }
+  if (isViewOnly(req)) return { scope: "all", filter: {} };
+  return null;
+};
+
+const VALID_STATUSES = ["Pending", "In Progress", "Completed", "Rejected", "Cancelled"];
 
 // =====================================================
-// CREATE - Create a new DC request
+// CREATE — admins only; assignedBy server-stamped
 // =====================================================
 const createDCRequest = async (req, res) => {
   try {
+    if (!canCreate(req)) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not allowed to create DC requests",
+      });
+    }
+
     const {
       requestingOrgan,
       requestType,
       requestDate,
       placeofSite,
-      assignedBy,
       assignedTo,
-      status
+      status,
     } = req.body;
 
-    // Validate required fields
     if (!requestingOrgan || !requestType || !placeofSite) {
       return res.status(400).json({
         success: false,
         message:
-          "Missing required fields: requestingOrgan, requestType, and placeofSite are required"
+          "Missing required fields: requestingOrgan, requestType, and placeofSite are required",
       });
     }
 
     if (status && !VALID_STATUSES.includes(status)) {
       return res.status(400).json({
         success: false,
-        message: `Invalid status. Must be one of: ${VALID_STATUSES.join(", ")}`
+        message: `Invalid status. Must be one of: ${VALID_STATUSES.join(", ")}`,
       });
     }
 
@@ -50,9 +106,9 @@ const createDCRequest = async (req, res) => {
       requestType,
       requestDate: requestDate ? new Date(requestDate) : new Date(),
       placeofSite,
-      assignedBy: assignedBy || "",
+      assignedBy: actorName(req) || actorUsername(req), // server-stamped
       assignedTo: assignedTo || "",
-      status: status || "Pending"
+      status: status || "Pending",
     });
 
     try {
@@ -70,24 +126,32 @@ const createDCRequest = async (req, res) => {
     res.status(201).json({
       success: true,
       message: "DC request created successfully",
-      data: dcRequest
+      data: dcRequest,
     });
   } catch (error) {
     console.error("Error creating DC request:", error);
     res.status(500).json({
       success: false,
       message: "Failed to create DC request",
-      error: error.message
+      error: error.message,
     });
   }
 };
 
 // =====================================================
-// READ - Get ALL DC requests
+// READ ALL — scoped: ADMIN→own, USER→assigned, ALL_VIEW→all
 // =====================================================
 const getAllDCRequests = async (req, res) => {
   try {
-    const dcRequests = await DCRequest.find()
+    const scoped = readAllScope(req);
+    if (!scoped) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not allowed to view DC requests",
+      });
+    }
+
+    const dcRequests = await DCRequest.find(scoped.filter)
       .sort({ requestDate: -1 })
       .lean();
 
@@ -95,20 +159,21 @@ const getAllDCRequests = async (req, res) => {
       success: true,
       message: "DC requests retrieved successfully",
       data: dcRequests,
-      count: dcRequests.length
+      count: dcRequests.length,
+      scope: scoped.scope,
     });
   } catch (error) {
     console.error("Error fetching DC requests:", error);
     res.status(500).json({
       success: false,
       message: "Failed to fetch DC requests",
-      error: error.message
+      error: error.message,
     });
   }
 };
 
 // =====================================================
-// READ - Get single DC request by Mongo _id
+// READ ONE — by Mongo _id
 // =====================================================
 const getDCRequestById = async (req, res) => {
   try {
@@ -117,7 +182,7 @@ const getDCRequestById = async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid DC request ID"
+        message: "Invalid DC request ID",
       });
     }
 
@@ -126,27 +191,34 @@ const getDCRequestById = async (req, res) => {
     if (!dcRequest) {
       return res.status(404).json({
         success: false,
-        message: "DC request not found"
+        message: "DC request not found",
+      });
+    }
+
+    if (!canReadOne(req, dcRequest)) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have access to this request",
       });
     }
 
     res.status(200).json({
       success: true,
       message: "DC request retrieved successfully",
-      data: dcRequest
+      data: dcRequest,
     });
   } catch (error) {
     console.error("Error fetching DC request:", error);
     res.status(500).json({
       success: false,
       message: "Failed to fetch DC request",
-      error: error.message
+      error: error.message,
     });
   }
 };
 
 // =====================================================
-// READ - Get DC request by DCId (e.g. DCREQ-001)
+// READ ONE — by DCId (e.g. DCREQ-001)
 // =====================================================
 const getDCRequestByDCId = async (req, res) => {
   try {
@@ -157,51 +229,72 @@ const getDCRequestByDCId = async (req, res) => {
     if (!dcRequest) {
       return res.status(404).json({
         success: false,
-        message: "DC request not found"
+        message: "DC request not found",
+      });
+    }
+
+    if (!canReadOne(req, dcRequest)) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have access to this request",
       });
     }
 
     res.status(200).json({
       success: true,
       message: "DC request retrieved successfully",
-      data: dcRequest
+      data: dcRequest,
     });
   } catch (error) {
     console.error("Error fetching DC request:", error);
     res.status(500).json({
       success: false,
       message: "Failed to fetch DC request",
-      error: error.message
+      error: error.message,
     });
   }
 };
 
 // =====================================================
-// UPDATE - Update DC request
+// UPDATE — owner only
 // =====================================================
 const updateDCRequest = async (req, res) => {
   try {
     const { id } = req.params;
-    const updateData = req.body;
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid DC request ID"
+        message: "Invalid DC request ID",
       });
     }
 
-    // Remove immutable fields
+    const existing = await DCRequest.findById(id);
+    if (!existing) {
+      return res.status(404).json({
+        success: false,
+        message: "DC request not found",
+      });
+    }
+
+    if (!canManage(req, existing)) {
+      return res.status(403).json({
+        success: false,
+        message: "You can only edit requests you created",
+      });
+    }
+
+    const updateData = { ...req.body };
     delete updateData._id;
     delete updateData.DCId;
     delete updateData.createdAt;
     delete updateData.updatedAt;
+    delete updateData.assignedBy; // immutable
 
-    // Validate status if provided
     if (updateData.status && !VALID_STATUSES.includes(updateData.status)) {
       return res.status(400).json({
         success: false,
-        message: `Invalid status. Must be one of: ${VALID_STATUSES.join(", ")}`
+        message: `Invalid status. Must be one of: ${VALID_STATUSES.join(", ")}`,
       });
     }
 
@@ -209,35 +302,28 @@ const updateDCRequest = async (req, res) => {
       updateData.requestDate = new Date(updateData.requestDate);
     }
 
-    const dcRequest = await DCRequest.findByIdAndUpdate(id, updateData, {
+    const updated = await DCRequest.findByIdAndUpdate(id, updateData, {
       new: true,
-      runValidators: true
+      runValidators: true,
     });
-
-    if (!dcRequest) {
-      return res.status(404).json({
-        success: false,
-        message: "DC request not found"
-      });
-    }
 
     res.status(200).json({
       success: true,
       message: "DC request updated successfully",
-      data: dcRequest
+      data: updated,
     });
   } catch (error) {
     console.error("Error updating DC request:", error);
     res.status(500).json({
       success: false,
       message: "Failed to update DC request",
-      error: error.message
+      error: error.message,
     });
   }
 };
 
 // =====================================================
-// UPDATE - Update status only
+// UPDATE STATUS — owner only
 // =====================================================
 const updateDCRequestStatus = async (req, res) => {
   try {
@@ -247,54 +333,62 @@ const updateDCRequestStatus = async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid DC request ID"
+        message: "Invalid DC request ID",
       });
     }
 
     if (!status) {
       return res.status(400).json({
         success: false,
-        message: "Status is required"
+        message: "Status is required",
       });
     }
 
     if (!VALID_STATUSES.includes(status)) {
       return res.status(400).json({
         success: false,
-        message: `Invalid status. Must be one of: ${VALID_STATUSES.join(", ")}`
+        message: `Invalid status. Must be one of: ${VALID_STATUSES.join(", ")}`,
       });
     }
 
-    const dcRequest = await DCRequest.findByIdAndUpdate(
+    const existing = await DCRequest.findById(id);
+    if (!existing) {
+      return res.status(404).json({
+        success: false,
+        message: "DC request not found",
+      });
+    }
+
+    if (!canManage(req, existing)) {
+      return res.status(403).json({
+        success: false,
+        message: "You can only update status for requests you created",
+      });
+    }
+
+    const updated = await DCRequest.findByIdAndUpdate(
       id,
       { status },
       { new: true, runValidators: true }
     );
 
-    if (!dcRequest) {
-      return res.status(404).json({
-        success: false,
-        message: "DC request not found"
-      });
-    }
-
     res.status(200).json({
       success: true,
       message: "DC request status updated successfully",
-      data: dcRequest
+      data: updated,
     });
   } catch (error) {
     console.error("Error updating DC request status:", error);
     res.status(500).json({
       success: false,
       message: "Failed to update DC request status",
-      error: error.message
+      error: error.message,
     });
   }
 };
 
 // =====================================================
-// DELETE - Delete DC request
+// DELETE — owner only + cascade
 // =====================================================
 const deleteDCRequest = async (req, res) => {
   try {
@@ -307,9 +401,7 @@ const deleteDCRequest = async (req, res) => {
       });
     }
 
-    // 1. Find first so we can grab DCId for cascade
     const dcRequest = await DCRequest.findById(id);
-
     if (!dcRequest) {
       return res.status(404).json({
         success: false,
@@ -317,22 +409,23 @@ const deleteDCRequest = async (req, res) => {
       });
     }
 
-    const dcId = dcRequest.DCId;
+    if (!canManage(req, dcRequest)) {
+      return res.status(403).json({
+        success: false,
+        message: "You can only delete requests you created",
+      });
+    }
 
-    // 2. Delete the DC request
+    const dcId = dcRequest.DCId;
     await DCRequest.findByIdAndDelete(id);
 
-    // 3. Cascade delete related records by DCId
-    //    Only run if DCId exists (avoid wiping records with undefined/null DCId)
     let deletedRelated = { design: 0, specification: 0, construction: 0 };
-
     if (dcId) {
       const [designRes, specRes, constrRes] = await Promise.all([
         Design.deleteMany({ DCId: dcId }),
         Specification.deleteMany({ DCId: dcId }),
         Construction.deleteMany({ DCId: dcId }),
       ]);
-
       deletedRelated = {
         design: designRes.deletedCount || 0,
         specification: specRes.deletedCount || 0,
@@ -357,7 +450,7 @@ const deleteDCRequest = async (req, res) => {
 };
 
 // =====================================================
-// GET - Next DC ID (utility)
+// GET next DC ID
 // =====================================================
 const getNextDCId = async (req, res) => {
   try {
@@ -365,25 +458,25 @@ const getNextDCId = async (req, res) => {
     res.status(200).json({
       success: true,
       message: "Next DC ID generated successfully",
-      data: { nextDCId: nextId }
+      data: { nextDCId: nextId },
     });
   } catch (error) {
     console.error("Error generating next DC ID:", error);
     res.status(500).json({
       success: false,
       message: "Failed to generate next DC ID",
-      error: error.message
+      error: error.message,
     });
   }
 };
 
 // =====================================================
-// GET - Statistics / summary
+// GET statistics
 // =====================================================
 const getDCStatistics = async (req, res) => {
   try {
     const stats = await DCRequest.aggregate([
-      { $group: { _id: "$status", count: { $sum: 1 } } }
+      { $group: { _id: "$status", count: { $sum: 1 } } },
     ]);
 
     const total = await DCRequest.countDocuments();
@@ -393,7 +486,7 @@ const getDCStatistics = async (req, res) => {
       "In Progress": 0,
       Completed: 0,
       Rejected: 0,
-      Cancelled: 0
+      Cancelled: 0,
     };
 
     stats.forEach((stat) => {
@@ -403,39 +496,42 @@ const getDCStatistics = async (req, res) => {
     res.status(200).json({
       success: true,
       message: "Statistics retrieved successfully",
-      data: { total, ...statusMap }
+      data: { total, ...statusMap },
     });
   } catch (error) {
     console.error("Error fetching statistics:", error);
     res.status(500).json({
       success: false,
       message: "Failed to fetch statistics",
-      error: error.message
+      error: error.message,
     });
   }
 };
 
 // =====================================================
-// GET - All users (for Assigned To dropdown)
+// GET users (Assigned To dropdown)
 // =====================================================
 const getUsers = async (req, res) => {
   try {
-    const users = await User.find({ role: "USER" })
-      .select("-password -__v")
+    const users = await User.find({
+      role: { $in: ["USER", "DC_ADMIN", "EST_ADMIN", "ALL_ADMIN"] },
+      enabled: true,
+    })
+      .select("name username role")
       .sort({ createdAt: -1 });
 
     res.status(200).json({
       success: true,
       message: "Users retrieved successfully",
       data: users,
-      count: users.length
+      count: users.length,
     });
   } catch (error) {
     console.error("Error fetching users:", error);
     res.status(500).json({
       success: false,
       message: "Failed to fetch users",
-      error: error.message
+      error: error.message,
     });
   }
 };
@@ -453,5 +549,5 @@ module.exports = {
   deleteDCRequest,
   getNextDCId,
   getDCStatistics,
-  getUsers
+  getUsers,
 };
