@@ -66,7 +66,7 @@ const REQUEST_TYPE_OPTIONS = [
   "Branch modification",
   "Head office modification",
   "maintenance",
-  "Other"
+  "Other",
 ];
 
 const EMPTY_REQUEST = {
@@ -86,6 +86,7 @@ const STATUS_COLORS = {
   Completed: "success",
   Rejected: "error",
   Cancelled: "default",
+  Pending: "warning",
 };
 
 const Transition = React.forwardRef(function Transition(props, ref) {
@@ -232,6 +233,31 @@ const DCRequest = () => {
 
   const loggedInUser = getLoggedInUserFromToken();
 
+  // ================= ROLE-BASED ACCESS =================
+  const role = String(loggedInUser?.role || "").toUpperCase();
+
+  // All *_ADMIN behave identically: see/create/manage only their own
+  const isAdminRole =
+    role === "ALL_ADMIN" || role === "EST_ADMIN" || role === "DC_ADMIN";
+  const isViewOnly = role === "ALL_VIEW";
+  const isUser = role === "USER";
+
+  const canCreate = isAdminRole;
+  const myName = loggedInUser?.fullName || loggedInUser?.name || "";
+  const myUsername = loggedInUser?.username || loggedInUser?.name || "";
+
+  const isOwner = (record) => {
+    if (!record) return false;
+    const by = String(record.assignedBy || "").trim();
+    if (!by) return false;
+    return by === myName || by === myUsername;
+  };
+
+  const canEdit = (record) => isAdminRole && isOwner(record);
+  const canDelete = (record) => isAdminRole && isOwner(record);
+  const canChangeStatus = (record) => isAdminRole && isOwner(record);
+  // =====================================================
+
   const getLoggedInDisplayName = useCallback(
     () =>
       loggedInUser?.fullName ||
@@ -277,6 +303,10 @@ const DCRequest = () => {
 
   /* ---------------- Fetch users ---------------- */
   const fetchUsers = useCallback(async () => {
+    if (!isAdminRole) {
+      setUsers([]);
+      return;
+    }
     try {
       const res = await axios.get(USERS_URL, {
         headers: { Authorization: `Bearer ${token}` },
@@ -295,7 +325,7 @@ const DCRequest = () => {
       console.error("Failed to fetch users:", err);
       setUsers([]);
     }
-  }, [token]);
+  }, [token, isAdminRole]);
 
   /* ---------------- Fetch DC requests ---------------- */
   const fetchRequests = useCallback(async () => {
@@ -391,6 +421,10 @@ const DCRequest = () => {
 
   /* ---------------- Status update ---------------- */
   const handleStatusUpdateClick = (record) => {
+    if (!canChangeStatus(record)) {
+      showSnackbar("You cannot change the status of this request", "warning");
+      return;
+    }
     setStatusUpdateRecord(record);
     setNewStatusValue(record.status || "In Progress");
     setStatusUpdateDialogOpen(true);
@@ -433,6 +467,10 @@ const DCRequest = () => {
 
   /* ---------------- Delete ---------------- */
   const handleDeleteClick = (record) => {
+    if (!canDelete(record)) {
+      showSnackbar("You cannot delete this request", "warning");
+      return;
+    }
     setSelectedRecord(record);
     setDeleteDialogOpen(true);
   };
@@ -518,6 +556,10 @@ const DCRequest = () => {
   };
 
   const handleEditRequest = (request) => {
+    if (!canEdit(request)) {
+      showSnackbar("You cannot edit this request", "warning");
+      return;
+    }
     const formattedRequest = {
       ...request,
       requestDate: request.requestDate
@@ -530,6 +572,10 @@ const DCRequest = () => {
   };
 
   const handleCreateRequest = () => {
+    if (!canCreate) {
+      showSnackbar("You are not allowed to create DC requests", "warning");
+      return;
+    }
     setEditId(null);
     setNewRequest({
       ...EMPTY_REQUEST,
@@ -538,36 +584,52 @@ const DCRequest = () => {
     setFormOpen(true);
   };
 
+  /* ---------------- Status chip ---------------- */
   const renderStatusChip = (record) => {
     const status = record.status || "In Progress";
+    const allowed = canChangeStatus(record);
+
     return (
-      <Chip
-        label={status}
-        color={getStatusColor(status)}
-        size="small"
-        sx={{
-          fontWeight: "bold",
-          cursor: "pointer",
-          "&:hover": {
-            opacity: 0.8,
-            transform: "scale(1.05)",
-            transition: "all 0.2s",
-          },
-        }}
-        onClick={(e) => {
-          e.stopPropagation();
-          handleStatusUpdateClick(record);
-        }}
-        icon={
-          status === "Completed" ? (
-            <CheckCircleIcon />
-          ) : status === "Rejected" || status === "Cancelled" ? (
-            <CancelIcon />
-          ) : (
-            <PendingIcon />
-          )
+      <Tooltip
+        title={
+          allowed ? "Click to update status" : "Not allowed to change status"
         }
-      />
+      >
+        <Chip
+          label={status}
+          color={getStatusColor(status)}
+          size="small"
+          sx={{
+            fontWeight: "bold",
+            cursor: allowed ? "pointer" : "default",
+            opacity: allowed ? 1 : 0.75,
+            "&:hover": allowed
+              ? {
+                opacity: 0.8,
+                transform: "scale(1.05)",
+                transition: "all 0.2s",
+              }
+              : {},
+          }}
+          onClick={
+            allowed
+              ? (e) => {
+                e.stopPropagation();
+                handleStatusUpdateClick(record);
+              }
+              : undefined
+          }
+          icon={
+            status === "Completed" ? (
+              <CheckCircleIcon />
+            ) : status === "Rejected" || status === "Cancelled" ? (
+              <CancelIcon />
+            ) : (
+              <PendingIcon />
+            )
+          }
+        />
+      </Tooltip>
     );
   };
 
@@ -604,14 +666,16 @@ const DCRequest = () => {
             alignItems="center"
             sx={{ flexGrow: 1, flexWrap: "wrap" }}
           >
-            <Button
-              variant="contained"
-              startIcon={<AddIcon />}
-              sx={lightStyles.actionBtn}
-              onClick={handleCreateRequest}
-            >
-              New Request
-            </Button>
+            {canCreate && (
+              <Button
+                variant="contained"
+                startIcon={<AddIcon />}
+                sx={lightStyles.actionBtn}
+                onClick={handleCreateRequest}
+              >
+                New Request
+              </Button>
+            )}
 
             <TextField
               placeholder="🔍 Universal search..."
@@ -656,7 +720,7 @@ const DCRequest = () => {
               <RefreshIcon fontSize="small" />
             </IconButton>
 
-            {/* ✅ Status filter — icon inside the value */}
+            {/* Status filter — icon inside the value */}
             <FormControl
               size="small"
               sx={{ minWidth: isMobile ? "100%" : "180px" }}
@@ -698,6 +762,45 @@ const DCRequest = () => {
           </Stack>
 
           <Stack direction="row" spacing={1} alignItems="center">
+            {isAdminRole && (
+              <Chip
+                label="Your own requests"
+                size="small"
+                sx={{
+                  height: 40,
+                  bgcolor: "rgba(255,214,0,0.15)",
+                  fontWeight: 600,
+                  color: "#7a5c00",
+                  "& .MuiChip-label": { px: 1.5 },
+                }}
+              />
+            )}
+            {isUser && (
+              <Chip
+                label="Assigned to you"
+                size="small"
+                sx={{
+                  height: 40,
+                  bgcolor: "rgba(255,214,0,0.15)",
+                  fontWeight: 600,
+                  color: "#7a5c00",
+                  "& .MuiChip-label": { px: 1.5 },
+                }}
+              />
+            )}
+            {isViewOnly && (
+              <Chip
+                label="Read-only · all requests"
+                size="small"
+                sx={{
+                  height: 40,
+                  bgcolor: "rgba(33,150,243,0.12)",
+                  fontWeight: 600,
+                  color: "#0d47a1",
+                  "& .MuiChip-label": { px: 1.5 },
+                }}
+              />
+            )}
             <Typography
               variant="caption"
               sx={{
@@ -705,9 +808,11 @@ const DCRequest = () => {
                 fontWeight: "bold",
                 border: "1px solid #e0e0e0",
                 px: 1.5,
-                py: 0.5,
                 borderRadius: "4px",
                 bgcolor: "rgba(255,214,0,0.05)",
+                height: 40,
+                display: "inline-flex",
+                alignItems: "center",
               }}
             >
               {filteredRequests.length} records
@@ -757,6 +862,7 @@ const DCRequest = () => {
                       "Request Type",
                       "Requested Date",
                       "Place of site",
+                      "Assigned By",
                       "Assigned Engineer",
                       "Status",
                       "Actions",
@@ -791,12 +897,12 @@ const DCRequest = () => {
                           cursor: "pointer",
                           backgroundColor:
                             selectedRowId === r._id
-                              ? "#a5d6a7f3"          // selected — soft green
+                              ? "#a5d6a7f3" // selected — soft green
                               : "transparent",
                           "&:hover": {
                             bgcolor:
                               selectedRowId === r._id
-                                ? "#66bb6a"          // selected + hover — deeper green
+                                ? "#66bb6a" // selected + hover — deeper green
                                 : "rgba(76, 175, 80, 0.12)", // unselected hover — faint green
                           },
                           transition: "background-color 0.2s ease",
@@ -819,7 +925,19 @@ const DCRequest = () => {
                         </TableCell>
 
                         <TableCell sx={lightStyles.tableCell}>
-                          {r.requestingOrgan || "—"}
+                          <Stack
+                            direction="row"
+                            spacing={0.5}
+                            alignItems="center"
+                          >
+                            <PersonIcon
+                              fontSize="small"
+                              sx={{ color: "#FFD600" }}
+                            />
+                            <Typography variant="body2">
+                              {r.requestingOrgan || "—"}
+                            </Typography>
+                          </Stack>
                         </TableCell>
 
                         <TableCell sx={lightStyles.tableCell}>
@@ -873,6 +991,26 @@ const DCRequest = () => {
                         <TableCell sx={lightStyles.tableCell}>
                           <Tooltip
                             title={
+                              r.assignedBy
+                                ? `Username: ${r.assignedBy}`
+                                : "Unassigned"
+                            }
+                          >
+                            <Stack direction="row" spacing={0.5} alignItems="center">
+                              <EngineeringIcon
+                                fontSize="small"
+                                sx={{ color: "#FFD600" }}
+                              />
+                              <Typography variant="body2">
+                                {getAssignedToDisplay(r.assignedBy)}
+                              </Typography>
+                            </Stack>
+                          </Tooltip>
+                        </TableCell>
+
+                        <TableCell sx={lightStyles.tableCell}>
+                          <Tooltip
+                            title={
                               r.assignedTo
                                 ? `Username: ${r.assignedTo}`
                                 : "Unassigned"
@@ -899,38 +1037,50 @@ const DCRequest = () => {
                         </TableCell>
 
                         <TableCell sx={lightStyles.tableCell}>
-                          <IconButton
-                            size="small"
-                            sx={{
-                              color: "#000000",
-                              "&:hover": {
-                                bgcolor: "#FFD600",
+                          {canEdit(r) && (
+                            <IconButton
+                              size="small"
+                              sx={{
                                 color: "#000000",
-                              },
-                            }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleEditRequest(r);
-                            }}
-                          >
-                            <EditIcon fontSize="small" />
-                          </IconButton>
-                          <IconButton
-                            size="small"
-                            sx={{
-                              color: "#ff4444",
-                              "&:hover": {
-                                bgcolor: "#ff0000",
-                                color: "#ffffff",
-                              },
-                            }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDeleteClick(r);
-                            }}
-                          >
-                            <DeleteIcon fontSize="small" />
-                          </IconButton>
+                                "&:hover": {
+                                  bgcolor: "#FFD600",
+                                  color: "#000000",
+                                },
+                              }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleEditRequest(r);
+                              }}
+                            >
+                              <EditIcon fontSize="small" />
+                            </IconButton>
+                          )}
+                          {canDelete(r) && (
+                            <IconButton
+                              size="small"
+                              sx={{
+                                color: "#ff4444",
+                                "&:hover": {
+                                  bgcolor: "#ff0000",
+                                  color: "#ffffff",
+                                },
+                              }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteClick(r);
+                              }}
+                            >
+                              <DeleteIcon fontSize="small" />
+                            </IconButton>
+                          )}
+                          {!canEdit(r) && !canDelete(r) && (
+                            <Typography
+                              variant="caption"
+                              color="text.secondary"
+                            >
+                              —
+                            </Typography>
+                          )}
                         </TableCell>
                       </TableRow>
                     ))
@@ -1027,6 +1177,13 @@ const DCRequest = () => {
               value={newRequest.requestingOrgan}
               onChange={handleRequestChange}
               required
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <PersonIcon sx={{ color: "#FFD600" }} />
+                  </InputAdornment>
+                ),
+              }}
             />
 
             {/* Request Type — icon inside the value */}
@@ -1090,6 +1247,13 @@ const DCRequest = () => {
               value={newRequest.requestDate}
               onChange={handleRequestChange}
               InputLabelProps={{ shrink: true }}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <FilterListIcon sx={{ color: "#FFD600" }} />
+                  </InputAdornment>
+                ),
+              }}
             />
 
             {/* Place of site */}
