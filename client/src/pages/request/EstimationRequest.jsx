@@ -47,9 +47,8 @@ import {
   Pending as PendingIcon,
   Engineering as EngineeringIcon,
   Place as PlaceIcon,
-  Event as EventIcon,
   Gavel as GavelIcon,
-  Apartment as ApartmentIcon,
+  Category as CategoryIcon,
   FilterList as FilterListIcon,
 } from "@mui/icons-material";
 import axios from "axios";
@@ -97,16 +96,6 @@ const STATUS_COLORS = {
 const Transition = React.forwardRef(function Transition(props, ref) {
   return <Slide direction="up" ref={ref} {...props} />;
 });
-
-const yellowButton = {
-  background: "#FFD600",
-  color: "#000000",
-  fontWeight: "bold",
-  "&:hover": {
-    background: "#ffcc00",
-    boxShadow: "0 4px 12px rgba(255, 214, 0, 0.5)",
-  },
-};
 
 const FIELD_HEIGHT = 40;
 
@@ -713,7 +702,7 @@ const EstimationRequest = () => {
                 showSnackbar("✅ Table updated", "success");
               }}
               sx={{
-                ...yellowButton,
+                ...lightStyles.actionBtn,
                 background: "transparent",
                 border: "1px solid #FFD600",
               }}
@@ -759,62 +748,62 @@ const EstimationRequest = () => {
           </Stack>
 
           <Stack direction="row" spacing={1} alignItems="center">
-  {isAdminRole && (
-    <Chip
-      label="Your own requests"
-      size="small"
-      sx={{
-        height: 40,                    // match TextField/Select size="small"
-        bgcolor: "rgba(255,214,0,0.15)",
-        fontWeight: 600,
-        color: "#7a5c00",
-        "& .MuiChip-label": { px: 1.5 },
-      }}
-    />
-  )}
-  {isUser && (
-    <Chip
-      label="Assigned to you"
-      size="small"
-      sx={{
-        height: 40,
-        bgcolor: "rgba(255,214,0,0.15)",
-        fontWeight: 600,
-        color: "#7a5c00",
-        "& .MuiChip-label": { px: 1.5 },
-      }}
-    />
-  )}
-  {isViewOnly && (
-    <Chip
-      label="Read-only · all requests"
-      size="small"
-      sx={{
-        height: 40,
-        bgcolor: "rgba(33,150,243,0.12)",
-        fontWeight: 600,
-        color: "#0d47a1",
-        "& .MuiChip-label": { px: 1.5 },
-      }}
-    />
-  )}
-  <Typography
-    variant="caption"
-    sx={{
-      color: "#000000",
-      fontWeight: "bold",
-      border: "1px solid #e0e0e0",
-      px: 1.5,
-      borderRadius: "4px",
-      bgcolor: "rgba(255,214,0,0.05)",
-      height: 40,
-      display: "inline-flex",
-      alignItems: "center",
-    }}
-  >
-    {filteredRequests.length} records
-  </Typography>
-</Stack>
+            {isAdminRole && (
+              <Chip
+                label="Your own requests"
+                size="small"
+                sx={{
+                  height: 40,
+                  bgcolor: "rgba(255,214,0,0.15)",
+                  fontWeight: 600,
+                  color: "#7a5c00",
+                  "& .MuiChip-label": { px: 1.5 },
+                }}
+              />
+            )}
+            {isUser && (
+              <Chip
+                label="Assigned to you"
+                size="small"
+                sx={{
+                  height: 40,
+                  bgcolor: "rgba(255,214,0,0.15)",
+                  fontWeight: 600,
+                  color: "#7a5c00",
+                  "& .MuiChip-label": { px: 1.5 },
+                }}
+              />
+            )}
+            {isViewOnly && (
+              <Chip
+                label="Read-only · all requests"
+                size="small"
+                sx={{
+                  height: 40,
+                  bgcolor: "rgba(33,150,243,0.12)",
+                  fontWeight: 600,
+                  color: "#0d47a1",
+                  "& .MuiChip-label": { px: 1.5 },
+                }}
+              />
+            )}
+            <Typography
+              variant="caption"
+              sx={{
+                color: "#000000",
+                fontWeight: "bold",
+                border: "1px solid #e0e0e0",
+                px: 1.5,
+                borderRadius: "4px",
+                bgcolor: "rgba(255,214,0,0.05)",
+                height: 40,
+                display: "inline-flex",
+                alignItems: "center",
+              }}
+            >
+              {filteredRequests.length} records
+            </Typography>
+          </Stack>
         </Paper>
 
         {/* --- DATA TABLE --- */}
@@ -922,6 +911,7 @@ const EstimationRequest = () => {
                           {r.estimationId}
                         </TableCell>
 
+                        {/* Requesting Organ */}
                         <TableCell sx={lightStyles.tableCell}>
                           <Stack direction="row" spacing={0.5} alignItems="center">
                             <PersonIcon fontSize="small" sx={{ color: "#FFD600" }} />
@@ -937,6 +927,7 @@ const EstimationRequest = () => {
                             : "—"}
                         </TableCell>
 
+                        {/* Applicant Name */}
                         <TableCell sx={lightStyles.tableCell}>
                           <Stack direction="row" spacing={0.5} alignItems="center">
                             <PersonIcon fontSize="small" sx={{ color: "#FFD600" }} />
@@ -946,6 +937,7 @@ const EstimationRequest = () => {
                           </Stack>
                         </TableCell>
 
+                        {/* Property Owner */}
                         <TableCell sx={lightStyles.tableCell}>
                           <Stack direction="row" spacing={0.5} alignItems="center">
                             <PersonIcon fontSize="small" sx={{ color: "#FFD600" }} />
@@ -955,6 +947,7 @@ const EstimationRequest = () => {
                           </Stack>
                         </TableCell>
 
+                        {/* Property Address */}
                         <TableCell sx={lightStyles.tableCell}>
                           <Tooltip title={r.propertyAddress || "—"}>
                             <Stack direction="row" spacing={0.5} alignItems="center">
@@ -974,6 +967,7 @@ const EstimationRequest = () => {
                           </Tooltip>
                         </TableCell>
 
+                        {/* Purpose */}
                         <TableCell sx={lightStyles.tableCell}>
                           <Tooltip title={r.purposeOfValuation || "Not described"}>
                             <Stack direction="row" spacing={0.5} alignItems="center">
@@ -993,10 +987,11 @@ const EstimationRequest = () => {
                           </Tooltip>
                         </TableCell>
 
+                        {/* Type — CategoryIcon (inherited from DC) */}
                         <TableCell sx={lightStyles.tableCell}>
                           <Tooltip title={r.typeOfProperty || "Not described"}>
                             <Stack direction="row" spacing={0.5} alignItems="center">
-                              <ApartmentIcon
+                              <CategoryIcon
                                 fontSize="small"
                                 sx={{ color: "#FFD600" }}
                               />
@@ -1015,10 +1010,26 @@ const EstimationRequest = () => {
                           </Tooltip>
                         </TableCell>
 
+                        {/* Assigned By — EngineeringIcon (inherited from DC) */}
                         <TableCell sx={lightStyles.tableCell}>
-                          {r.assignedBy || "—"}
+                          <Tooltip
+                            title={
+                              r.assignedBy ? `Username: ${r.assignedBy}` : "—"
+                            }
+                          >
+                            <Stack direction="row" spacing={0.5} alignItems="center">
+                              <EngineeringIcon
+                                fontSize="small"
+                                sx={{ color: "#FFD600" }}
+                              />
+                              <Typography variant="body2">
+                                {r.assignedBy || "—"}
+                              </Typography>
+                            </Stack>
+                          </Tooltip>
                         </TableCell>
 
+                        {/* Assigned To */}
                         <TableCell sx={lightStyles.tableCell}>
                           <Tooltip
                             title={
@@ -1192,7 +1203,7 @@ const EstimationRequest = () => {
               }}
             />
 
-            {/* Request Date */}
+            {/* Request Date — FilterListIcon (inherited from DC) */}
             <TextField
               fullWidth
               label="Request Date"
@@ -1206,7 +1217,7 @@ const EstimationRequest = () => {
               InputProps={{
                 startAdornment: (
                   <InputAdornment position="start">
-                    <EventIcon sx={{ color: "#FFD600" }} />
+                    <FilterListIcon sx={{ color: "#FFD600" }} />
                   </InputAdornment>
                 ),
               }}
@@ -1304,7 +1315,7 @@ const EstimationRequest = () => {
               </Select>
             </FormControl>
 
-            {/* Type of Property */}
+            {/* Type of Property — CategoryIcon (inherited from DC) */}
             <FormControl fullWidth size="small" sx={lightStyles.input}>
               <InputLabel id="type-of-property-label">
                 Type of Property
@@ -1322,7 +1333,7 @@ const EstimationRequest = () => {
                 sx={lightStyles.input}
                 renderValue={(selected) => (
                   <SelectValueRow
-                    icon={<ApartmentIcon sx={{ fontSize: 18 }} />}
+                    icon={<CategoryIcon sx={{ fontSize: 18 }} />}
                     text={selected}
                     placeholder="Select property type…"
                   />
@@ -1339,7 +1350,7 @@ const EstimationRequest = () => {
                 {TYPE_OPTIONS.map((option) => (
                   <MenuItem key={option} value={option}>
                     <Stack direction="row" spacing={1} alignItems="center">
-                      <ApartmentIcon
+                      <CategoryIcon
                         fontSize="small"
                         sx={{ color: "#FFD600" }}
                       />
